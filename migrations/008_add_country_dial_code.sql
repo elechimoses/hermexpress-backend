@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS country_dial_code VARCHAR(10) DEFAULT '+234';

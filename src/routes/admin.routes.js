@@ -1,0 +1,44 @@
+import express from 'express';
+const router = express.Router();
+import { verifyToken } from '../middleware/auth.middleware.js';
+import { verifyAdmin } from '../middleware/admin.middleware.js';
+import * as adminController from '../controllers/admin.controller.js';
+import * as paymentController from '../controllers/payment.controller.js';
+import * as insuranceController from '../controllers/insurance.controller.js';
+
+// Apply middleware to all admin routes
+router.use(verifyToken, verifyAdmin);
+
+// Countries
+router.post('/countries', adminController.createCountry);
+router.put('/countries/:id', adminController.updateCountry);
+router.get('/countries', adminController.getCountries);
+
+// Cities
+router.post('/cities', adminController.createCity);
+router.put('/cities/:id', adminController.updateCity);
+router.get('/cities', adminController.getCities);
+
+// Options
+router.post('/options', adminController.createOption);
+router.put('/options/:id', adminController.updateOption);
+router.get('/options', adminController.getOptions);
+
+// Rates
+router.post('/rates', adminController.createRate);
+router.put('/rates/:id', adminController.updateRate);
+router.delete('/rates/:id', adminController.deleteRate);
+router.get('/rates', adminController.getRates);
+
+// Payment Methods
+router.get('/payment-methods', paymentController.getAllPaymentMethods);
+router.post('/payment-methods', paymentController.addPaymentMethods);
+router.put('/payment-methods/:id', paymentController.updatePaymentMethod);
+
+// Insurance Policies
+router.post('/insurance-policies', insuranceController.createInsurancePolicy);
+router.put('/insurance-policies/:id', insuranceController.updateInsurancePolicy);
+router.delete('/insurance-policies/:id', insuranceController.deleteInsurancePolicy);
+router.get('/insurance-policies', insuranceController.getInsurancePolicies);
+
+export default router;
