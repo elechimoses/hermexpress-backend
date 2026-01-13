@@ -35,7 +35,7 @@ import userRouter from './src/routes/user.routes.js';
 import shipmentRouter from './src/routes/shipment.routes.js';
 import paymentRouter from './src/routes/payment.routes.js';
 
-app.use('/auth', authRouter);
+app.use('/api/auth', authRouter);
 app.use('/api', quoteRouter);
 app.use('/api/shipments', shipmentRouter);
 app.use('/api/payment', paymentRouter);
