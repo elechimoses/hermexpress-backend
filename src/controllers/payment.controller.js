@@ -7,7 +7,7 @@ import { sendShipmentNotifications } from '../utils/email.js';
 export const getPaymentMethods = async (req, res) => {
     try {
         const result = await query(
-            'SELECT id, provider, name, description, config FROM payment_methods WHERE is_active = TRUE'
+            'SELECT id, provider, name, description, config, image_url FROM payment_methods WHERE is_active = TRUE'
         );
         return success(res, 'Active payment methods', result.rows);
     } catch (err) {
@@ -31,6 +31,12 @@ export const getAllPaymentMethods = async (req, res) => {
 export const updatePaymentMethod = async (req, res) => {
     const { id } = req.params;
     const { is_active, config } = req.body;
+    
+    // Handle Image Upload
+    let imageUrl = null;
+    if (req.file) {
+         imageUrl = req.file.path.replace(/\\/g, "/");
+    }
 
     try {
         // Build dynamic update query
@@ -47,6 +53,12 @@ export const updatePaymentMethod = async (req, res) => {
         if (config !== undefined) {
             updateQuery += `, config = $${paramIndex}`;
             params.push(config);
+            paramIndex++;
+        }
+
+        if (imageUrl) {
+            updateQuery += `, image_url = $${paramIndex}`;
+            params.push(imageUrl);
             paramIndex++;
         }
 
@@ -70,15 +82,21 @@ export const updatePaymentMethod = async (req, res) => {
 export const addPaymentMethods = async (req, res) => {
     const { provider, name, description, is_active, config } = req.body;
 
+    // Handle Image Upload
+    let imageUrl = null;
+    if (req.file) {
+            imageUrl = req.file.path.replace(/\\/g, "/");
+    }
+
     if (!provider || !name) {
         return error(res, 'Provider and Name are required', 400);
     }
 
     try {
         const result = await query(
-            `INSERT INTO payment_methods (provider, name, description, is_active, config)
-             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-            [provider, name, description, is_active !== undefined ? is_active : false, config || {}]
+            `INSERT INTO payment_methods (provider, name, description, is_active, config, image_url)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            [provider, name, description, is_active !== undefined ? is_active : false, config || {}, imageUrl]
         );
         return success(res, 'Payment method added', result.rows[0], 201);
     } catch (err) {

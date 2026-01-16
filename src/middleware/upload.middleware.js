@@ -12,6 +12,7 @@ const storage = new CloudinaryStorage({
   params: {
     folder: (req, file) => {
         if (file.fieldname === 'avatar') return 'hermexpress/avatars';
+        if (file.fieldname === 'image') return 'hermexpress/payments';
         return 'hermexpress/user_ids';
     },
     allowed_formats: ['jpg', 'png', 'jpeg', 'pdf'],

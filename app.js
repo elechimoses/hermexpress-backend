@@ -34,11 +34,13 @@ import userRouter from './src/routes/user.routes.js';
 
 import shipmentRouter from './src/routes/shipment.routes.js';
 import paymentRouter from './src/routes/payment.routes.js';
+import categoryRouter from './src/routes/category.routes.js';
 
 app.use('/api/auth', authRouter);
 app.use('/api', quoteRouter);
 app.use('/api/shipments', shipmentRouter);
 app.use('/api/payment', paymentRouter);
+app.use('/api/categories', categoryRouter);
 
 app.use('/api/user', userRouter);
 app.use('/api/admin', adminRouter);

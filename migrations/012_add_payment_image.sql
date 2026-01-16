@@ -1,0 +1,2 @@
+ALTER TABLE payment_methods
+ADD COLUMN IF NOT EXISTS image_url VARCHAR(255);

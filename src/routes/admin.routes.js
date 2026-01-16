@@ -5,6 +5,8 @@ import { verifyAdmin } from '../middleware/admin.middleware.js';
 import * as adminController from '../controllers/admin.controller.js';
 import * as paymentController from '../controllers/payment.controller.js';
 import * as insuranceController from '../controllers/insurance.controller.js';
+import * as categoryController from '../controllers/category.controller.js';
+import { upload } from '../middleware/upload.middleware.js';
 
 // Apply middleware to all admin routes
 router.use(verifyToken, verifyAdmin);
@@ -32,13 +34,16 @@ router.get('/rates', adminController.getRates);
 
 // Payment Methods
 router.get('/payment-methods', paymentController.getAllPaymentMethods);
-router.post('/payment-methods', paymentController.addPaymentMethods);
-router.put('/payment-methods/:id', paymentController.updatePaymentMethod);
+router.post('/payment-methods', upload.single('image'), paymentController.addPaymentMethods);
+router.put('/payment-methods/:id', upload.single('image'), paymentController.updatePaymentMethod);
 
 // Insurance Policies
 router.post('/insurance-policies', insuranceController.createInsurancePolicy);
 router.put('/insurance-policies/:id', insuranceController.updateInsurancePolicy);
 router.delete('/insurance-policies/:id', insuranceController.deleteInsurancePolicy);
 router.get('/insurance-policies', insuranceController.getInsurancePolicies);
+
+// Categories
+router.post('/categories', categoryController.createCategory);
 
 export default router;
