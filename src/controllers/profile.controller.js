@@ -1,8 +1,9 @@
 import { query } from '../db/index.js';
 import { success, error } from '../utils/reponse.js';
 
+
 export const completeProfile = async (req, res) => {
-    // ... existing completeProfile code ...
+    // 1. Destructure all possible fields
     const { 
         // Common
         address, landmark, country, state, city, postal_code,
@@ -12,13 +13,15 @@ export const completeProfile = async (req, res) => {
         business_name, business_type, registration_number, tax_id
     } = req.body;
     
-    // File uploaded via middleware
+    // 2. Handle File Upload (safe check)
     const idCardUrl = req.file ? req.file.path.replace(/\\/g, "/") : null;
 
     try {
         const userId = req.user.id;
         
+        // 3. Check User Status
         const userRes = await query('SELECT account_type, is_profile_complete FROM users WHERE id = $1', [userId]);
+        
         if (userRes.rows.length === 0) return error(res, 'User not found', 404);
         
         const { account_type, is_profile_complete } = userRes.rows[0];
@@ -33,32 +36,87 @@ export const completeProfile = async (req, res) => {
 
         const isBusiness = account_type?.toLowerCase() === 'business';
 
+        // 4. Dynamic Validation Helper
+        // We define what is required for each type. 
+        // Note: 'tax_id', 'landmark', 'postal_code', and 'id_card_url' are treated as optional based on your logic.
+        
+        let missingFields = [];
+
         if (isBusiness) {
-            if (!business_name || !business_type || !registration_number || !address || !country || !state || !city) {
-                 return error(res, 'Missing required business profile fields', 400);
+            const businessRequired = [
+                'business_name', 
+                'business_type', 
+                'registration_number', 
+                'address', 
+                'country', 
+                'state', 
+                'city'
+            ];
+            
+            // Filter keys that are missing in req.body or empty strings
+            missingFields = businessRequired.filter(field => !req.body[field]);
+
+            if (missingFields.length > 0) {
+                return error(res, `Missing required business fields: ${missingFields.join(', ')}`, 400);
             }
 
+            // Insert Business Profile
             await query(
                 `INSERT INTO business_profiles (
                     user_id, business_name, business_type, registration_number, tax_id, 
                     business_address, landmark, country, state, city, postal_code, id_card_url
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-                [userId, business_name, business_type, registration_number, tax_id, address, landmark, country, state, city, postal_code, idCardUrl]
+                [
+                    userId, 
+                    business_name, 
+                    business_type, 
+                    registration_number, 
+                    tax_id || null, // Handle optional field
+                    address, 
+                    landmark || null, 
+                    country, 
+                    state, 
+                    city, 
+                    postal_code || null, 
+                    idCardUrl
+                ]
             );
 
         } else {
-            if (!date_of_birth || !address || !country || !state || !city) {
-                return error(res, 'Missing required personal profile fields', 400);
+            const personalRequired = [
+                'date_of_birth', 
+                'address', 
+                'country', 
+                'state', 
+                'city'
+            ];
+
+            missingFields = personalRequired.filter(field => !req.body[field]);
+
+            if (missingFields.length > 0) {
+                return error(res, `Missing required personal fields: ${missingFields.join(', ')}`, 400);
             }
             
+            // Insert Personal Profile
             await query(
                 `INSERT INTO user_profiles (
                     user_id, date_of_birth, address, landmark, country, state, city, postal_code, id_card_url
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-                [userId, date_of_birth, address, landmark, country, state, city, postal_code, idCardUrl]
+                [
+                    userId, 
+                    date_of_birth, 
+                    address, 
+                    landmark || null, 
+                    country, 
+                    state, 
+                    city, 
+                    postal_code || null, 
+                    idCardUrl
+                ]
             );
         }
 
+        // 5. Update User Status
         await query('UPDATE users SET is_profile_complete = TRUE WHERE id = $1', [userId]);
         
         return success(res, 'Profile completed successfully');
@@ -68,7 +126,6 @@ export const completeProfile = async (req, res) => {
         return error(res, 'Failed to complete profile', 500);
     }
 };
-
 export const getProfile = async (req, res) => {
     try {
         const userId = req.user.id;
