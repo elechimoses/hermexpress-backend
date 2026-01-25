@@ -3,8 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const APP_URL = process.env.APP_URL || 'http://localhost:3000';
-const KORAPAY_BASE_URL = process.env.KORAPAY_BASE_URL || 'https://api.korapay.com/merchant/api/v1';
+const APP_URL = process.env.APP_URL;
+const KORAPAY_BASE_URL = process.env.KORAPAY_BASE_URL;
+const PAYSTACK_PAYMENT_URL = process.env.PAYSTACK_PAYMENT_URL;
 
 export const initializePayment = async (data) => {
     const { 
@@ -33,11 +34,12 @@ export const initializePayment = async (data) => {
                 tracking_number: trackingNumber,
                 shipment_id: shipmentId,
                 payment_method: 'paystack',
+                ...data.metadata 
             },
         };
 
         const response = await axios.post(
-            'https://api.paystack.co/transaction/initialize',
+            `${PAYSTACK_PAYMENT_URL}/transaction/initialize`,
             payload,
             {
                 headers: {
@@ -82,9 +84,12 @@ export const initializePayment = async (data) => {
             metadata: {
                 tracking_number: trackingNumber,
                 shipment_id: shipmentId,
+                ...data.metadata
             },
             merchant_bears_cost: false,
         };
+
+        console.log(payload);
 
         let lastError;
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -111,7 +116,6 @@ export const initializePayment = async (data) => {
                     };
                 }
             } catch (err) {
-                console.warn(`Korapay Attempt ${attempt} failed:`, err.message);
                 lastError = err;
                 await new Promise(r => setTimeout(r, 1000 * attempt));
             }
@@ -160,7 +164,12 @@ export const verifyPayment = async (provider, reference) => {
                     data: response.data.data
                 };
             }
-            return { success: false, message: 'Paystack status not success' };
+             // Should return data even if status is not success, to retrieve metadata
+            return { 
+                success: false, 
+                message: 'Paystack status not success',
+                data: response.data?.data 
+            };
         } catch (error) {
             console.error('Paystack Verify Error:', error.message);
             return { success: false, message: error.message };
@@ -189,7 +198,12 @@ export const verifyPayment = async (provider, reference) => {
                     data: response.data.data
                 };
             }
-            return { success: false, message: 'Korapay status not success' };
+             // Should return data even if status is not success, to retrieve metadata
+            return { 
+                success: false, 
+                message: 'Korapay status not success',
+                data: response.data?.data
+            };
 
         } catch (error) {
              console.error('Korapay Verify Error:', error.message);

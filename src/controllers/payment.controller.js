@@ -1,7 +1,20 @@
 import { query } from '../db/index.js';
 import { success, error } from '../utils/reponse.js';
 import { initializePayment, verifyPayment } from '../services/payment.service.js';
-import { sendShipmentNotifications } from '../utils/email.js';
+import { sendShipmentNotifications, sendWalletFundingSuccessEmail, sendWalletFundingFailureEmail } from '../utils/email.js';
+import { createNotification } from '../utils/notification.js';
+
+
+const AMOUNT_DIVISOR = {
+  paystack: 100,
+  korapay: 1,
+};
+
+const TRANSACTION_TYPES = {
+  WALLET_FUNDING: 'wallet_funding',
+};
+
+const normalizeAmount = (amount, provider) => Number(amount) / (AMOUNT_DIVISOR[provider] || 100);
 
 // Public: Get Active Methods
 export const getPaymentMethods = async (req, res) => {
@@ -39,7 +52,6 @@ export const updatePaymentMethod = async (req, res) => {
     }
 
     try {
-        // Build dynamic update query
         let updateQuery = 'UPDATE payment_methods SET updated_at = NOW()';
         const params = [];
         let paramIndex = 1;
@@ -137,6 +149,10 @@ export const initializeTransaction = async (req, res) => {
             return error(res, 'No payment method selected for this shipment', 400);
         }
 
+        if (shipment.status === 'paid') {
+            return error(res,'Shipment has already been paid', 409 );
+        }
+
         // 3. Initialize via Service
         const result = await initializePayment({
             provider: shipment.payment_method.provider,
@@ -156,114 +172,293 @@ export const initializeTransaction = async (req, res) => {
     }
 };
 
-// Public: Handle Payment Callback
+
 export const handlePaymentCallback = async (req, res) => {
- // 'paystack' or 'korapay'
-    const { provider } = req.params;
-    const { reference, trxref } = req.query;// Paystack uses trxref sometimes, but mostly reference
+  const { provider } = req.params;
+  const { reference, trxref } = req.query;
 
-    const paymentRef = reference || trxref;
+  const paymentRef = reference || trxref;
 
-    console.log('Payment Reference:', paymentRef);
+  if (!paymentRef) {
+    return error(res, 'No payment reference provided', 400);
+  }
 
-    if (!paymentRef) {
-        return error(res, 'No payment reference found', 400);
+  console.log(`[${provider.toUpperCase()}] Processing callback for ref: ${paymentRef}`);
+
+  try {
+    // 1. Verify payment
+    const verification = await verifyPayment(provider, paymentRef);
+    const data = verification.data;
+    const metadata = data?.metadata || {};
+    const transactionType = metadata?.transaction_type;
+
+    // If verification failed completely (no data) or it's not wallet funding, strictly enforce success
+    if (!verification?.success && (!data || transactionType !== TRANSACTION_TYPES.WALLET_FUNDING)) {
+      return error(res, 'Payment verification failed', 400);
     }
 
-    try {
-        // 1. Verify Payment with Provider
-        const verification = await verifyPayment(provider, paymentRef);
-        console.log('Payment Verification:', verification);
-
-        if (!verification.success) {
-           return error(res, 'Payment verification failed', 400);
-        }
-
-        // 2. Get Shipment Identifier from Metadata
-        // Paystack: data.metadata.tracking_number
-        // Korapay: data.metadata.tracking_number
-        const mechanismData = verification.data;
-        const trackingNumber = mechanismData.metadata?.tracking_number;
-
-        if (!trackingNumber) {
-            console.error('No tracking number in payment metadata');
-            return error(res, 'No tracking number in payment metadata', 400);
-            //return res.redirect(`${process.env.APP_URL}/?error=Invalid payment metadata`);
-        }
-
-        // 3. Find Shipment & Check Status
-        const shipmentRes = await query(
-            `SELECT s.*, sa.name as sender_name, sa.email as sender_email,
-                    ra.name as receiver_name, ra.email as receiver_email
-             FROM shipments s
-             LEFT JOIN shipment_addresses sa ON s.id = sa.shipment_id AND sa.type = 'sender'
-             LEFT JOIN shipment_addresses ra ON s.id = ra.shipment_id AND ra.type = 'receiver'
-             WHERE s.tracking_number = $1`,
-            [trackingNumber]
-        );
-
-        if (shipmentRes.rows.length === 0) {
-            return res.redirect(`${process.env.APP_URL}/?error=Shipment not found`);
-        }
-
-        const shipment = shipmentRes.rows[0];
-
-        if (shipment.status === 'paid') {
-             return res.redirect(`${process.env.APP_URL}/tracking/${trackingNumber}?success=Payment already confirmed`);
-        }
-
-        // 4. Update Shipment Status
-        // Update payment_method snapshot with verified reference if needed? 
-        // We'll just update status and paid_at. 
-        // Ideally we should also store the transaction ref in shipments table if there's a column, 
-        // or update the payment_method jsonb to include the external reference.
-        
-        // Let's update the payment_method jsonb to include the paymentRef
-        const updatedPaymentMethod = {
-            ...shipment.payment_method,
-            transactionReference: paymentRef,
-            verifiedAt: new Date()
-        };
-
-        await query(
-            `UPDATE shipments 
-             SET status = 'paid',payment_method = $1 
-             WHERE id = $2`,
-            [updatedPaymentMethod, shipment.id]
-        );
-
-        // 5. Add Tracking History (if table exists - assuming 'tracking_statuses')
-        // We will try this inside a try/catch block so it doesn't break the flow if table missing
-        try {
-            await query(
-                `INSERT INTO tracking_statuses (shipment_id, status, description, created_at)
-                 VALUES ($1, 'paid', $2, NOW())`,
-                [shipment.id, `Payment confirmed via ${provider}`]
-            );
-        } catch (trkErr) {
-            console.warn('Failed to insert tracking status (table might be missing):', trkErr.message);
-        }
-
-        // 6. Send Notifications
-        // Construct shipment object expected by sendShipmentNotifications
-        const notificationData = {
-            trackingNumber: shipment.tracking_number,
-            sender: { name: shipment.sender_name, email: shipment.sender_email },
-            receiver: { name: shipment.receiver_name, email: shipment.receiver_email },
-            totalPrice: Number(shipment.total_price),
-            paymentMethod: updatedPaymentMethod
-        };
-
-        // Async send
-        sendShipmentNotifications(notificationData).catch(err => 
-            console.error('Callback Notification Error:', err)
-        );
-
-        // 7. Redirect to Tracking Page
-        return res.redirect(`${process.env.APP_URL}/tracking/${trackingNumber}?success=Payment successful`);
-
-    } catch (err) {
-        console.error('Payment Callback Error:', err);
-        return res.redirect(`${process.env.APP_URL}/?error=System error processing payment`);
+    // Early return for wallet funding (independent flow)
+    if (transactionType === TRANSACTION_TYPES.WALLET_FUNDING) {
+      if (verification.success) {
+          return await handleWalletFunding(res, paymentRef, provider, data, metadata);
+      } else {
+          return await handleWalletFundingFailure(res, paymentRef, provider, data, metadata);
+      }
     }
+
+    // 2. Shipment / order payment flow (default)
+    return await handleShipmentPayment(res, paymentRef, provider, data, metadata);
+
+  } catch (err) {
+    console.error(`[${provider}] Payment callback failed:`, err);
+    return error(res, 'Internal error processing payment callback', 500);
+  }
 };
+
+/**
+ * Handle wallet top-up logic
+ */
+async function handleWalletFunding(res, paymentRef, provider, verificationData, metadata) {
+  const walletId = metadata.wallet_id;
+  if (!walletId) {
+    return error(res, 'Missing wallet_id in metadata', 400);
+  }
+
+  const amount = normalizeAmount(verificationData.amount, provider);
+
+  try {
+    await query('BEGIN');
+
+    // Idempotency check
+    const existing = await query(
+      'SELECT 1 FROM wallet_transactions WHERE reference = $1 AND status = $2',
+      [paymentRef, 'success']
+    );
+
+    if (existing.rows.length > 0) {
+      await query('ROLLBACK');
+      return error(res, 'Payment already processed', 409); // 409 Conflict is more appropriate
+    }
+
+    // Get current balance for transaction record
+    const walletBefore = await query(
+      'SELECT balance FROM wallets WHERE id = $1 FOR UPDATE',
+      [walletId]
+    );
+
+    if (walletBefore.rows.length === 0) {
+      await query('ROLLBACK');
+      return error(res, 'Wallet not found', 404);
+    }
+
+    const balanceBefore = Number(walletBefore.rows[0].balance);
+
+    // Credit wallet
+    await query(
+      'UPDATE wallets SET balance = balance + $1, updated_at = NOW() WHERE id = $2',
+      [amount, walletId]
+    );
+
+    // Record transaction
+    await query(
+      `INSERT INTO wallet_transactions (
+        wallet_id, type, amount, balance_before, balance_after,
+        reference, description, status, meta_data, created_at
+      ) VALUES ($1, 'credit', $2, $3, $4, $5, $6, 'success', $7, NOW())`,
+      [
+        walletId,
+        amount,
+        balanceBefore,
+        balanceBefore + amount,
+        paymentRef,
+        `Wallet funded via ${provider}`,
+        JSON.stringify(metadata),
+      ]
+    );
+
+    await query('COMMIT');
+
+    // Send Success Email
+    // Try to get email from data > metadata > query user
+    let userEmail = verificationData.customer?.email;
+    let userName = 'User';
+    
+    // If we only have walletId, we might need to fetch user details if email is missing
+    if (!userEmail) {
+         try {
+             // We can join wallets and users
+             const uInfo = await query('SELECT u.email, u.first_name FROM users u JOIN wallets w ON u.id = w.user_id WHERE w.id = $1', [walletId]);
+             if (uInfo.rows.length > 0) {
+                 userEmail = uInfo.rows[0].email;
+                 userName = uInfo.rows[0].first_name;
+             }
+         } catch(e) { console.error('Failed to fetch user for email', e); }
+    }
+
+    if (userEmail) {
+        sendWalletFundingSuccessEmail({
+            email: userEmail,
+            name: userName,
+            amount: amount,
+            newBalance: balanceBefore + amount,
+            transactionReference: paymentRef
+        });
+    }
+
+    createNotification(
+        metadata.user_id, 
+        'Wallet Funded',
+        `Your wallet has been funded with ₦${amount.toLocaleString()}. New Balance: ₦${(balanceBefore + amount).toLocaleString()}`,
+        'funding',
+        { walletId, amount, reference: paymentRef }
+    );
+    // Correction: In handleWalletFunding, I have 'metadata' which contains 'user_id'.
+    // Let's use metadata.user_id.
+
+    return success(res, 'Wallet funded successfully', { amount, walletId });
+
+  } catch (err) {
+    await query('ROLLBACK');
+    console.error('Wallet funding failed:', err);
+    return error(res, 'Failed to credit wallet', 500);
+  }
+}
+
+/**
+ * Handle wallet funding failure
+ */
+async function handleWalletFundingFailure(res, paymentRef, provider, verificationData, metadata) {
+   const walletId = metadata.wallet_id;
+   const amount = normalizeAmount(verificationData.amount || 0, provider);
+   
+    // Try to get email
+    let userEmail = verificationData.customer?.email;
+    let userName = 'User';
+
+    if (!userEmail && walletId) {
+         try {
+             const uInfo = await query('SELECT u.email, u.first_name FROM users u JOIN wallets w ON u.id = w.user_id WHERE w.id = $1', [walletId]);
+             if (uInfo.rows.length > 0) {
+                 userEmail = uInfo.rows[0].email;
+                 userName = uInfo.rows[0].first_name;
+             }
+         } catch(e) { console.error('Failed to fetch user for failure email', e); }
+    }
+
+    if (userEmail) {
+        sendWalletFundingFailureEmail({
+            email: userEmail,
+            name: userName,
+            amount: amount,
+            transactionReference: paymentRef
+        });
+    }
+
+    if (metadata.user_id) {
+         createNotification(
+            metadata.user_id,
+            'Wallet Funding Failed',
+            `Funding attempt of ₦${amount.toLocaleString()} failed. Ref: ${paymentRef}`,
+            'funding',
+            { walletId, amount, reference: paymentRef, status: 'failed' }
+        );
+    }
+    
+    // We still return error response to the caller (likely a webhook or frontend redirect)
+    return error(res, 'Payment failed or declined', 400);
+}
+
+/**
+ * Handle shipment/order payment logic
+ */
+async function handleShipmentPayment(res, paymentRef, provider, verificationData, metadata) {
+  const trackingNumber = metadata.tracking_number;
+
+  if (!trackingNumber) {
+    return error(res, 'Missing tracking_number in payment metadata', 400);
+  }
+
+  const shipmentRes = await query(
+    `SELECT s.*, 
+            sa.name AS sender_name,  sa.email AS sender_email,
+            ra.name AS receiver_name, ra.email AS receiver_email
+     FROM shipments s
+     LEFT JOIN shipment_addresses sa ON s.id = sa.shipment_id AND sa.type = 'sender'
+     LEFT JOIN shipment_addresses ra ON s.id = ra.shipment_id AND ra.type = 'receiver'
+     WHERE s.tracking_number = $1`,
+    [trackingNumber]
+  );
+
+  if (shipmentRes.rows.length === 0) {
+    return error(res, 'Shipment not found', 404);
+  }
+
+  const shipment = shipmentRes.rows[0];
+
+  if (shipment.status === 'paid') {
+    return error(res, 'Shipment payment already confirmed', 409);
+  }
+
+  // Prepare updated payment method object
+  const updatedPaymentMethod = {
+    ...shipment.payment_method,
+    provider,
+    transactionReference: paymentRef,
+    verifiedAt: new Date().toISOString(),
+    amount: verificationData.amount,
+  };
+
+  try {
+    await query('BEGIN');
+
+    // Update shipment
+    await query(
+      `UPDATE shipments 
+       SET status = 'paid', 
+           payment_method = $1,
+           updated_at = NOW()
+       WHERE id = $2`,
+      [updatedPaymentMethod, shipment.id]
+    );
+
+    // Record tracking history
+    // await query(
+    //   `INSERT INTO tracking_statuses (shipment_id, status, description, created_at)
+    //    VALUES ($1, 'paid', $2, NOW())`,
+    //   [shipment.id, `Payment confirmed via ${provider}`]
+    // );
+
+    await query('COMMIT');
+
+    // Fire and forget notifications
+    const notificationData = {
+      trackingNumber: shipment.tracking_number,
+      sender: { name: shipment.sender_name, email: shipment.sender_email },
+      receiver: { name: shipment.receiver_name, email: shipment.receiver_email },
+      totalPrice: Number(shipment.total_price),
+      paymentMethod: updatedPaymentMethod,
+    };
+
+    sendShipmentNotifications(notificationData).catch(err =>
+      console.error('Notification dispatch failed:', err)
+    );
+
+    createNotification(
+        shipment.user_id,
+        'Shipment Paid',
+        `Shipment ${shipment.tracking_number} has been paid successfully.`,
+        'shipment',
+        { shipmentId: shipment.id, trackingNumber: shipment.tracking_number, amount: verificationData.amount }
+    );
+
+    return success(res, 'Shipment payment confirmed', {
+      trackingNumber: shipment.tracking_number,
+      status: 'paid',
+    });
+
+  } catch (err) {
+    await query('ROLLBACK');
+    console.error('Shipment payment update failed:', err);
+    return error(res, 'Failed to update shipment status', 500);
+  }
+}

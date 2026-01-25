@@ -135,6 +135,46 @@ export const bookShipment = async (req, res) => {
             config: paymentMethod.config
         };
 
+        // --- WALLET PAYMENT LOGIC ---
+        let initialStatus = 'pending';
+        let walletTransactionData = null; // Store data to insert after shipment creation
+
+        if (paymentMethod.provider === 'wallet') {
+            if (!userId) {
+                await client.query('ROLLBACK');
+                return error(res, 'You must be logged in to pay with wallet', 401);
+            }
+
+            // Lock Wallet Row
+            const walletRes = await client.query('SELECT * FROM wallets WHERE user_id = $1 FOR UPDATE', [userId]);
+            if (walletRes.rows.length === 0 || !walletRes.rows[0].is_active) {
+                 await client.query('ROLLBACK');
+                 return error(res, 'Wallet not active or not found', 400);
+            }
+
+            const wallet = walletRes.rows[0];
+            const balance = Number(wallet.balance);
+
+            if (balance < totalPrice) {
+                 await client.query('ROLLBACK');
+                 return error(res, 'Insufficient wallet balance', 400);
+            }
+
+            // Debit Wallet
+            const newBalance = balance - totalPrice;
+            await client.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [newBalance, wallet.id]);
+
+            initialStatus = 'paid';
+            
+            // Prepare transaction data
+            walletTransactionData = {
+                walletId: wallet.id,
+                amount: totalPrice,
+                balanceBefore: balance,
+                balanceAfter: newBalance
+            };
+        }
+
         // --- 3. Create Shipment ---
         const trackingNumber = generateTrackingNumber();
 
@@ -144,10 +184,28 @@ export const bookShipment = async (req, res) => {
                 shipment_option_id, insurance_policy_id, 
                 shipping_fee, insurance_fee, total_price, currency,
                 payment_method
-            ) VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, 'NGN', $9) RETURNING id`,
-            [trackingNumber, userId, serviceType, serviceOptionId, insurancePolicyId || null, shippingFee, insuranceFee, totalPrice, paymentSnapshot]
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'NGN', $10) RETURNING id`,
+            [trackingNumber, userId, initialStatus, serviceType, serviceOptionId, insurancePolicyId || null, shippingFee, insuranceFee, totalPrice, paymentSnapshot]
         );
         const shipmentId = shipmentRes.rows[0].id;
+
+        // --- WALLET PART 2: Record Transaction ---
+        if (walletTransactionData) {
+            await client.query(
+                 `INSERT INTO wallet_transactions 
+                  (wallet_id, type, amount, balance_before, balance_after, reference, description, status, meta_data)
+                  VALUES ($1, 'debit', $2, $3, $4, $5, $6, 'success', $7)`,
+                  [
+                      walletTransactionData.walletId, 
+                      walletTransactionData.amount, 
+                      walletTransactionData.balanceBefore, 
+                      walletTransactionData.balanceAfter, 
+                      trackingNumber, 
+                      'Payment for Shipment', 
+                      JSON.stringify({ shipment_id: shipmentId })
+                  ]
+            );
+        }
 
         // --- 4. Save Shipment Addresses (Snapshot) ---
         const addAddress = async (type, data) => {
@@ -342,5 +400,124 @@ export const calculateRates = async (req, res) => {
     } catch (err) {
         console.error('Calculate Rates Error:', err);
         return error(res, 'Failed to calculate rates', 500);
+    }
+};
+
+// --- User Dashboard Endpoints ---
+
+export const getUserRecentShipments = async (req, res) => {
+    const userId = req.user.id;
+    try {
+        // Fetch recent shipments with receiver name
+        // We join with shipment_addresses to get the receiver name specifically
+        const result = await query(
+            `SELECT s.id, s.tracking_number, s.total_price, s.created_at, s.status,
+                    sa.name as receiver_name
+             FROM shipments s
+             LEFT JOIN shipment_addresses sa ON s.id = sa.shipment_id AND sa.type = 'receiver'
+             WHERE s.user_id = $1
+             ORDER BY s.created_at DESC
+             LIMIT 5`,
+            [userId]
+        );
+
+        const shipments = result.rows.map(s => ({
+            id: s.id,
+            trackingNumber: s.tracking_number,
+            receiver: s.receiver_name,
+            amount: s.total_price,
+            date: s.created_at, // Format in frontend or here if specific format needed
+            status: s.status
+        }));
+
+        return success(res, 'Recent shipments fetched', shipments);
+    } catch (err) {
+        console.error('Get User Recent Shipments Error:', err);
+        return error(res, 'Failed to get recent shipments', 500);
+    }
+};
+
+export const getUserPendingShipmentCount = async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const result = await query(
+            `SELECT COUNT(*) as count FROM shipments WHERE user_id = $1 AND status = 'pending'`,
+            [userId]
+        );
+        return success(res, 'Pending shipment count fetched', { count: Number(result.rows[0].count) });
+    } catch (err) {
+         console.error('Get User Pending Count Error:', err);
+        return error(res, 'Failed to get pending shipment count', 500);
+    }
+};
+
+export const getUserTotalShipmentCount = async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const result = await query(
+            `SELECT COUNT(*) as count FROM shipments WHERE user_id = $1`,
+            [userId]
+        );
+        return success(res, 'Total shipment count fetched', { count: Number(result.rows[0].count) });
+    } catch (err) {
+         console.error('Get User Total Count Error:', err);
+        return error(res, 'Failed to get total shipment count', 500);
+    }
+};
+
+// --- Admin Dashboard Endpoints ---
+
+export const getAdminRecentShipments = async (req, res) => {
+    try {
+        // Similar to user but no user_id filter (or all)
+        const result = await query(
+            `SELECT s.id, s.tracking_number, s.total_price, s.created_at, s.status,
+                    sa.name as receiver_name,
+                    u.first_name, u.last_name, u.email as user_email
+             FROM shipments s
+             LEFT JOIN shipment_addresses sa ON s.id = sa.shipment_id AND sa.type = 'receiver'
+             LEFT JOIN users u ON s.user_id = u.id
+             ORDER BY s.created_at DESC
+             LIMIT 10`
+        );
+
+         const shipments = result.rows.map(s => ({
+            id: s.id,
+            trackingNumber: s.tracking_number,
+            receiver: s.receiver_name,
+            senderName: s.first_name ? `${s.first_name} ${s.last_name}` : 'Guest/Unknown', 
+            amount: s.total_price,
+            date: s.created_at,
+            status: s.status
+        }));
+
+        return success(res, 'All recent shipments fetched', shipments);
+    } catch (err) {
+        console.error('Get Admin Recent Shipments Error:', err);
+        return error(res, 'Failed to get all recent shipments', 500);
+    }
+};
+
+export const getAdminPendingShipmentCount = async (req, res) => {
+     try {
+        const result = await query(
+            `SELECT COUNT(*) as count FROM shipments WHERE status = 'pending'`
+        );
+        return success(res, 'All pending shipment count fetched', { count: Number(result.rows[0].count) });
+    } catch (err) {
+         console.error('Get Admin Pending Count Error:', err);
+        return error(res, 'Failed to get all pending shipment count', 500);
+    }
+};
+
+export const getAdminTotalShipmentCount = async (req, res) => {
+     try {
+        const result = await query(
+            `SELECT COUNT(*) as count FROM shipments`
+        );
+        return success(res, 'All total shipment count fetched', { count: Number(result.rows[0].count) });
+    } catch (err) {
+         console.error('Get Admin Total Count Error:', err);
+        return error(res, 'Failed to get all total shipment count', 500);
     }
 };

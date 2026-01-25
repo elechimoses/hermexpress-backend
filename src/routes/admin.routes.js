@@ -46,4 +46,14 @@ router.get('/insurance-policies', insuranceController.getInsurancePolicies);
 // Categories
 router.post('/categories', categoryController.createCategory);
 
+// Wallets
+import * as walletController from '../controllers/wallet.controller.js';
+router.post('/wallets/update', walletController.adminUpdateWallet);
+
+// Shipments (Admin Dashboard)
+import * as shipmentController from '../controllers/shipment.controller.js';
+router.get('/shipments/recent', shipmentController.getAdminRecentShipments);
+router.get('/shipments/pending-count', shipmentController.getAdminPendingShipmentCount);
+router.get('/shipments/total-count', shipmentController.getAdminTotalShipmentCount);
+
 export default router;
