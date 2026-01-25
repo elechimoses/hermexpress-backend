@@ -3,9 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const APP_URL = process.env.APP_URL;
-const KORAPAY_BASE_URL = process.env.KORAPAY_BASE_URL;
-const PAYSTACK_PAYMENT_URL = process.env.PAYSTACK_PAYMENT_URL;
+const APP_URL = process.env.APP_URL || 'http://localhost:3000';
+const KORAPAY_BASE_URL = process.env.KORAPAY_BASE_URL || 'https://api.korapay.com/merchant/api/v1';
+const PAYSTACK_PAYMENT_URL = process.env.PAYSTACK_PAYMENT_URL || 'https://api.paystack.co/transaction/initializ';
 
 export const initializePayment = async (data) => {
     const { 
@@ -34,12 +34,12 @@ export const initializePayment = async (data) => {
                 tracking_number: trackingNumber,
                 shipment_id: shipmentId,
                 payment_method: 'paystack',
-                ...data.metadata 
+                ...data.metadata // Merge extra metadata (e.g. wallet_funding)
             },
         };
 
         const response = await axios.post(
-            `${PAYSTACK_PAYMENT_URL}/transaction/initialize`,
+            'https://api.paystack.co/transaction/initialize',
             payload,
             {
                 headers: {
