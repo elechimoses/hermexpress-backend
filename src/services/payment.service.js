@@ -3,9 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const APP_URL = process.env.APP_URL || 'http://localhost:3000';
-const KORAPAY_BASE_URL = process.env.KORAPAY_BASE_URL || 'https://api.korapay.com/merchant/api/v1';
-const PAYSTACK_PAYMENT_URL = process.env.PAYSTACK_PAYMENT_URL || 'https://api.paystack.co/transaction/initializ';
+const APP_URL = process.env.APP_URL;
+const KORAPAY_BASE_URL = process.env.KORAPAY_BASE_URL;
+const PAYSTACK_PAYMENT_URL = process.env.PAYSTACK_PAYMENT_URL;
 
 export const initializePayment = async (data) => {
     const { 
@@ -39,7 +39,7 @@ export const initializePayment = async (data) => {
         };
 
         const response = await axios.post(
-            'https://api.paystack.co/transaction/initialize',
+            `${PAYSTACK_PAYMENT_URL}/transaction/initialize`,
             payload,
             {
                 headers: {
@@ -148,7 +148,7 @@ export const verifyPayment = async (provider, reference) => {
 
         try {
             const response = await axios.get(
-                `https://api.paystack.co/transaction/verify/${reference}`,
+                `${PAYSTACK_PAYMENT_URL}/transaction/verify/${reference}`,
                 {
                     headers: {
                         Authorization: `Bearer ${secretKey}`,
@@ -179,7 +179,7 @@ export const verifyPayment = async (provider, reference) => {
     // 2. Korapay Verification
     else if (provider === 'korapay') {
         const secretKey = process.env.KORAPAY_SECRET_KEY;
-        const baseUrl = process.env.KORAPAY_BASE_URL || 'https://api.korapay.com/merchant/api/v1';
+        const baseUrl = process.env.KORAPAY_BASE_URL;
 
         if (!secretKey) throw new Error('Korapay Secret Key not configured');
 
