@@ -96,7 +96,26 @@ export const bookShipment = async (req, res) => {
         }
 
         const rate = rateRes.rows[0];
-        const shippingFee = Number(rate.base_fee) + (chargeableWeight * Number(rate.rate_per_kg));
+        let shippingFee = Number(rate.base_fee) + (chargeableWeight * Number(rate.rate_per_kg));
+
+        // --- TIER DISCOUNT LOGIC ---
+        let tierDiscount = 0;
+        if (userId) {
+            const tierRes = await client.query(
+                `SELECT t.discount_percentage 
+                 FROM user_tiers t 
+                 JOIN users u ON u.tier_id = t.id 
+                 WHERE u.id = $1 AND t.is_active = TRUE`,
+                [userId]
+            );
+            if (tierRes.rows.length > 0) {
+                tierDiscount = Number(tierRes.rows[0].discount_percentage);
+                if (tierDiscount > 0) {
+                    const discountAmount = shippingFee * (tierDiscount / 100);
+                    shippingFee -= discountAmount;
+                }
+            }
+        }
 
         // C. Calculate Insurance Fee
         let insuranceFee = 0;
@@ -189,6 +208,13 @@ export const bookShipment = async (req, res) => {
         );
         const shipmentId = shipmentRes.rows[0].id;
 
+        // --- 3.1 Initial Status History ---
+        await client.query(
+            `INSERT INTO shipment_status_history (shipment_id, status, description) 
+             VALUES ($1, $2, 'Shipment created and booking initiated')`,
+            [shipmentId, initialStatus]
+        );
+
         // --- WALLET PART 2: Record Transaction ---
         if (walletTransactionData) {
             await client.query(
@@ -263,7 +289,6 @@ export const bookShipment = async (req, res) => {
             trackingNumber,
             totalPrice,
             currency: 'NGN',
-            status: 'pending',
             paymentMethod: paymentSnapshot
         }, 201);
 
@@ -346,10 +371,31 @@ export const calculateRates = async (req, res) => {
             pickupCountryId, destinationCountryId, serviceType, chargeableWeight
         ]);
 
+        // --- TIER DISCOUNT LOGIC for QUOTES ---
+        let tierDiscount = 0;
+        const userId = req.user ? req.user.id : null;
+        if (userId) {
+            const tierRes = await query(
+                `SELECT t.discount_percentage 
+                 FROM user_tiers t 
+                 JOIN users u ON u.tier_id = t.id 
+                 WHERE u.id = $1 AND t.is_active = TRUE`,
+                [userId]
+            );
+            if (tierRes.rows.length > 0) {
+                tierDiscount = Number(tierRes.rows[0].discount_percentage);
+            }
+        }
+
         const quotes = ratesRes.rows.map(r => {
             const base = Number(r.base_fee);
             const perKg = Number(r.rate_per_kg);
-            const total = Math.round(base + (chargeableWeight * perKg));
+            let total = base + (chargeableWeight * perKg);
+
+            if (tierDiscount > 0) {
+                total -= (total * (tierDiscount / 100));
+            }
+            total = Math.round(total);
 
             return {
                 id: r.option_id,
@@ -469,25 +515,29 @@ export const getUserTotalShipmentCount = async (req, res) => {
 
 export const getAdminRecentShipments = async (req, res) => {
     try {
-        // Similar to user but no user_id filter (or all)
         const result = await query(
             `SELECT s.id, s.tracking_number, s.total_price, s.created_at, s.status,
-                    sa.name as receiver_name,
+                    sa_r.name as receiver_name,
+                    sa_s.city as origin_city, sa_s.country as origin_country,
+                    sa_r.city as dest_city, sa_r.country as dest_country,
                     u.first_name, u.last_name, u.email as user_email
              FROM shipments s
-             LEFT JOIN shipment_addresses sa ON s.id = sa.shipment_id AND sa.type = 'receiver'
+             LEFT JOIN shipment_addresses sa_r ON s.id = sa_r.shipment_id AND sa_r.type = 'receiver'
+             LEFT JOIN shipment_addresses sa_s ON s.id = sa_s.shipment_id AND sa_s.type = 'sender'
              LEFT JOIN users u ON s.user_id = u.id
              ORDER BY s.created_at DESC
              LIMIT 10`
         );
 
-         const shipments = result.rows.map(s => ({
+        const shipments = result.rows.map(s => ({
             id: s.id,
             trackingNumber: s.tracking_number,
             receiver: s.receiver_name,
+            origin: s.origin_city && s.origin_country ? `${s.origin_city}, ${s.origin_country}` : 'N/A',
+            destination: s.dest_city && s.dest_country ? `${s.dest_city}, ${s.dest_country}` : 'N/A',
             senderName: s.first_name ? `${s.first_name} ${s.last_name}` : 'Guest/Unknown', 
             amount: s.total_price,
-            date: s.created_at,
+            createdAt: s.created_at,
             status: s.status
         }));
 
@@ -519,5 +569,167 @@ export const getAdminTotalShipmentCount = async (req, res) => {
     } catch (err) {
          console.error('Get Admin Total Count Error:', err);
         return error(res, 'Failed to get all total shipment count', 500);
+    }
+};
+
+export const getShipmentDetails = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const shipmentRes = await query('SELECT * FROM shipments WHERE id = $1', [id]);
+        if (shipmentRes.rows.length === 0) return error(res, 'Shipment not found', 404);
+
+        const shipment = shipmentRes.rows[0];
+
+        const addressesRes = await query('SELECT * FROM shipment_addresses WHERE shipment_id = $1', [id]);
+        const packagesRes = await query('SELECT * FROM shipment_packages WHERE shipment_id = $1', [id]);
+        const historyRes = await query('SELECT * FROM shipment_status_history WHERE shipment_id = $1 ORDER BY created_at DESC', [id]);
+
+        return success(res, 'Shipment details fetched', {
+            ...shipment,
+            addresses: addressesRes.rows,
+            packages: packagesRes.rows,
+            statusHistory: historyRes.rows
+        });
+    } catch (err) {
+        console.error('Get Details Error:', err);
+        return error(res, 'Failed to fetch shipment details', 500);
+    }
+};
+
+export const updateShipmentStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status, description } = req.body;
+    const validStatuses = ['pending', 'paid', 'processing', 'pickup', 'in_transit', 'delivered', 'cancelled'];
+    
+    if (!validStatuses.includes(status)) {
+        return error(res, 'Invalid status', 400);
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // Update shipment
+        const updateRes = await client.query(
+            'UPDATE shipments SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+            [status, id]
+        );
+
+        if (updateRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return error(res, 'Shipment not found', 404);
+        }
+
+        // Add history
+        await client.query(
+            'INSERT INTO shipment_status_history (shipment_id, status, description) VALUES ($1, $2, $3)',
+            [id, status, description || `Status updated to ${status}`]
+        );
+
+        // --- AUTOMATIC TIER UPGRADE LOGIC ---
+        if (status === 'delivered' && updateRes.rows[0].user_id) {
+            const userId = updateRes.rows[0].user_id;
+            
+            // 1. Get total delivered shipments for this user
+            const deliveredRes = await client.query(
+                `SELECT COUNT(*) FROM shipments WHERE user_id = $1 AND status = 'delivered'`,
+                [userId]
+            );
+            const totalDelivered = parseInt(deliveredRes.rows[0].count);
+
+            // 2. Find the highest tier they qualify for
+            const qualifyingTierRes = await client.query(
+                `SELECT * FROM user_tiers 
+                 WHERE min_shipments <= $1 AND is_active = TRUE 
+                 ORDER BY level DESC LIMIT 1`,
+                [totalDelivered]
+            );
+
+            if (qualifyingTierRes.rows.length > 0) {
+                const newTier = qualifyingTierRes.rows[0];
+                
+                // 3. Update user's tier if it's different/higher
+                // First get current tier level to ensure we only upgrade (or at least check)
+                const userTierRes = await client.query(
+                    `SELECT t.level FROM users u LEFT JOIN user_tiers t ON u.tier_id = t.id WHERE u.id = $1`,
+                    [userId]
+                );
+                
+                const currentLevel = userTierRes.rows[0]?.level || 0;
+                
+                if (newTier.level > currentLevel) {
+                    await client.query(
+                        'UPDATE users SET tier_id = $1 WHERE id = $2',
+                        [newTier.id, userId]
+                    );
+                    // Optional: Add a history entry or notification for tier upgrade
+                }
+            }
+        }
+
+        await client.query('COMMIT');
+        return success(res, 'Shipment status updated', { status });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Update Status Error:', err);
+        return error(res, 'Failed to update status', 500);
+    } finally {
+        client.release();
+    }
+};
+
+export const trackShipment = async (req, res) => {
+    const { trackingNumber } = req.params;
+    try {
+        // Fetch shipment basic info, history, origin, destination, and option for ETA
+        const shipmentRes = await query(
+            `SELECT s.id, s.tracking_number, s.status, s.created_at,
+                    o.min_days, o.max_days,
+                    sa_s.city as origin_city, sa_s.country as origin_country,
+                    sa_r.city as dest_city, sa_r.country as dest_country
+             FROM shipments s
+             LEFT JOIN shipment_options o ON s.shipment_option_id = o.id
+             LEFT JOIN shipment_addresses sa_s ON s.id = sa_s.shipment_id AND sa_s.type = 'sender'
+             LEFT JOIN shipment_addresses sa_r ON s.id = sa_r.shipment_id AND sa_r.type = 'receiver'
+             WHERE s.tracking_number = $1`,
+            [trackingNumber]
+        );
+
+        if (shipmentRes.rows.length === 0) {
+            return error(res, 'Shipment not found', 404);
+        }
+
+        const shipment = shipmentRes.rows[0];
+
+        // Calculate Estimated Delivery Date
+        let estimatedDeliveryDate = null;
+        if (shipment.created_at && shipment.max_days) {
+            const date = new Date(shipment.created_at);
+            date.setDate(date.getDate() + shipment.max_days);
+            estimatedDeliveryDate = date;
+        }
+
+        const historyRes = await query(
+            'SELECT status, description, created_at FROM shipment_status_history WHERE shipment_id = $1 ORDER BY created_at ASC',
+            [shipment.id]
+        );
+
+        return success(res, 'Tracking history fetched', {
+            trackingNumber: shipment.tracking_number,
+            currentStatus: shipment.status,
+            origin: {
+                city: shipment.origin_city,
+                country: shipment.origin_country
+            },
+            destination: {
+                city: shipment.dest_city,
+                country: shipment.dest_country
+            },
+            estimatedDeliveryDate,
+            history: historyRes.rows
+        });
+    } catch (err) {
+        console.error('Track Shipment Error:', err);
+        return error(res, 'Failed to fetch tracking history', 500);
     }
 };

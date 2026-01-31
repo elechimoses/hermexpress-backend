@@ -132,13 +132,31 @@ export const getProfile = async (req, res) => {
         
         // Fetch User + Basic Info
         const userRes = await query(
-            `SELECT id, first_name, last_name, email, phone, country_dial_code, account_type, is_verified, is_profile_complete, avatar_url 
-             FROM users WHERE id = $1`, 
+            `SELECT u.id, u.first_name, u.last_name, u.email, u.phone, u.country_dial_code, 
+                    u.account_type, u.is_verified, u.is_profile_complete, u.avatar_url,
+                    u.tier_id, t.name as tier_name, t.discount_percentage as tier_discount, t.level as tier_level
+             FROM users u 
+             LEFT JOIN user_tiers t ON u.tier_id = t.id
+             WHERE u.id = $1`, 
             [userId]
         );
         
         if (userRes.rows.length === 0) return error(res, 'User not found', 404);
         const user = userRes.rows[0];
+
+        // Fetch Next Tier Info
+        const nextTierRes = await query(
+            'SELECT name, min_shipments, discount_percentage FROM user_tiers WHERE level > $1 AND is_active = TRUE ORDER BY level ASC LIMIT 1',
+            [user.tier_level || 0]
+        );
+        const nextTier = nextTierRes.rows[0] || null;
+
+        // Count delivered shipments for progress
+        const deliveredCountRes = await query(
+            "SELECT COUNT(*) FROM shipments WHERE user_id = $1 AND status = 'delivered'",
+            [userId]
+        );
+        const deliveredCount = parseInt(deliveredCountRes.rows[0].count);
 
         let profileData = {};
 
@@ -153,7 +171,14 @@ export const getProfile = async (req, res) => {
              }
         }
 
-        return success(res, 'Profile fetched', { user, profile: profileData });
+        return success(res, 'Profile fetched', { 
+            user, 
+            profile: profileData,
+            tierProgress: {
+                currentDelivered: deliveredCount,
+                nextTier: nextTier
+            }
+        });
 
     } catch (err) {
         console.error('Get Profile Error:', err);

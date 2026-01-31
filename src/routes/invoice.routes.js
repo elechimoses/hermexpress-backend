@@ -11,6 +11,6 @@ router.use(verifyToken);
 router.post('/create', verifyAdmin, createInvoice);
 
 // User/Admin Get Invoices
-router.get('/', getInvoices);
+router.get('/invoices', getInvoices);
 
 export default router;

@@ -4,7 +4,8 @@ import {
     calculateRates,
     getUserRecentShipments,
     getUserPendingShipmentCount,
-    getUserTotalShipmentCount
+    getUserTotalShipmentCount,
+    trackShipment
 } from '../controllers/shipment.controller.js';
 import { verifyToken } from '../middleware/auth.middleware.js';
 
@@ -31,7 +32,8 @@ const optionalAuth = async (req, res, next) => {
 };
 
 router.post('/book', optionalAuth, bookShipment);
-router.post('/rates', calculateRates);
+router.post('/rates', optionalAuth, calculateRates);
+router.get('/track/:trackingNumber', trackShipment);
 
 // User Dashboard Routes (Protected)
 router.get('/user/recent', verifyToken, getUserRecentShipments);

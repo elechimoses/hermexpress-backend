@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS invoices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    shipment_id INTEGER,
+    shipment_id UUID,
     user_id INTEGER,
     amount DECIMAL(12, 2) NOT NULL,
     reason TEXT NOT NULL,

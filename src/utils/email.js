@@ -249,3 +249,35 @@ export const sendWalletFundingFailureEmail = async (data) => {
         console.error('Error sending wallet failure email:', err);
     }
 };
+
+export const sendAdminContactNotification = async (data) => {
+    const { first_name, last_name, email, message } = data;
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@hermexpress.com';
+
+    const htmlContent = generateEmailTemplate({
+        title: 'New Contact Message',
+        body: `
+            <p>You have received a new message from the contact form.</p>
+            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                <p><strong>Name:</strong> ${first_name} ${last_name}</p>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Message:</strong></p>
+                <p>${message}</p>
+            </div>
+        `,
+        buttonText: 'View in Admin',
+        buttonLink: 'https://admin.hermexpress.com/messages'
+    });
+
+    try {
+        await transporter.sendMail({
+            from: '"Hermexpress" <no-reply@hermexpress.com>',
+            to: adminEmail,
+            subject: `New Contact Message from ${first_name} ${last_name}`,
+            html: htmlContent
+        });
+        console.log(`Admin contact notification sent for ${email}`);
+    } catch (err) {
+        console.error('Error sending admin contact notification:', err);
+    }
+};

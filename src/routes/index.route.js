@@ -9,6 +9,7 @@ import shipmentRouter from './shipment.routes.js';
 import paymentRouter from './payment.routes.js';
 import categoryRouter from './category.routes.js';
 import invoiceRouter from './invoice.routes.js';
+import { submitContactForm } from '../controllers/contact.controller.js';
 
 import { verifyToken } from '../middleware/auth.middleware.js';
 
@@ -22,6 +23,7 @@ router.use('/api', quoteRouter);
 router.use('/api/shipments', shipmentRouter);
 router.use('/api/payment', paymentRouter);
 router.use('/api/categories', categoryRouter);
+router.use('/api/contact', submitContactForm);
 
 router.use('/api/invoices', verifyToken, invoiceRouter);
 

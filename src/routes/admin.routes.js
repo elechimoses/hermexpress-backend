@@ -6,10 +6,16 @@ import * as adminController from '../controllers/admin.controller.js';
 import * as paymentController from '../controllers/payment.controller.js';
 import * as insuranceController from '../controllers/insurance.controller.js';
 import * as categoryController from '../controllers/category.controller.js';
+import * as walletController from '../controllers/wallet.controller.js';
+import * as shipmentController from '../controllers/shipment.controller.js';
 import { upload } from '../middleware/upload.middleware.js';
 
 // Apply middleware to all admin routes
 router.use(verifyToken, verifyAdmin);
+
+// Settings
+router.get('/settings', adminController.getSettings);
+router.patch('/settings', adminController.updateSetting);
 
 // Countries
 router.post('/countries', adminController.createCountry);
@@ -47,13 +53,30 @@ router.get('/insurance-policies', insuranceController.getInsurancePolicies);
 router.post('/categories', categoryController.createCategory);
 
 // Wallets
-import * as walletController from '../controllers/wallet.controller.js';
+
 router.post('/wallets/update', walletController.adminUpdateWallet);
 
 // Shipments (Admin Dashboard)
-import * as shipmentController from '../controllers/shipment.controller.js';
+
 router.get('/shipments/recent', shipmentController.getAdminRecentShipments);
 router.get('/shipments/pending-count', shipmentController.getAdminPendingShipmentCount);
 router.get('/shipments/total-count', shipmentController.getAdminTotalShipmentCount);
+router.get('/shipments/:id', shipmentController.getShipmentDetails);
+router.patch('/shipments/:id/status', shipmentController.updateShipmentStatus);
+
+// User Management
+router.get('/users', adminController.getUsers);
+router.get('/users/:id', adminController.getUserProfile);
+router.patch('/users/:userId/tier', adminController.setUserTier);
+
+// Contact Messages
+router.get('/contact-messages', adminController.getContactMessages);
+router.patch('/contact-messages/:id/status', adminController.markContactMessageAsRead);
+
+// Tiers
+router.get('/tiers', adminController.getTiers);
+router.post('/tiers', adminController.createTier);
+router.put('/tiers/:id', adminController.updateTier);
+router.delete('/tiers/:id', adminController.deleteTier);
 
 export default router;

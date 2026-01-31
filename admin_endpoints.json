@@ -1,0 +1,158 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/admin/countries",
+    "description": "Create a country",
+    "controller": "adminController.createCountry"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/countries/:id",
+    "description": "Update a country",
+    "controller": "adminController.updateCountry"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/countries",
+    "description": "Get all countries",
+    "controller": "adminController.getCountries"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/cities",
+    "description": "Create a city",
+    "controller": "adminController.createCity"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/cities/:id",
+    "description": "Update a city",
+    "controller": "adminController.updateCity"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/cities",
+    "description": "Get all cities",
+    "controller": "adminController.getCities"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/options",
+    "description": "Create an option",
+    "controller": "adminController.createOption"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/options/:id",
+    "description": "Update an option",
+    "controller": "adminController.updateOption"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/options",
+    "description": "Get all options",
+    "controller": "adminController.getOptions"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/rates",
+    "description": "Create a rate",
+    "controller": "adminController.createRate"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/rates/:id",
+    "description": "Update a rate",
+    "controller": "adminController.updateRate"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/rates/:id",
+    "description": "Delete a rate",
+    "controller": "adminController.deleteRate"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/rates",
+    "description": "Get all rates",
+    "controller": "adminController.getRates"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/payment-methods",
+    "description": "Get all payment methods",
+    "controller": "paymentController.getAllPaymentMethods"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/payment-methods",
+    "description": "Add a payment method",
+    "controller": "paymentController.addPaymentMethods"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/payment-methods/:id",
+    "description": "Update a payment method",
+    "controller": "paymentController.updatePaymentMethod"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/insurance-policies",
+    "description": "Create an insurance policy",
+    "controller": "insuranceController.createInsurancePolicy"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/insurance-policies/:id",
+    "description": "Update an insurance policy",
+    "controller": "insuranceController.updateInsurancePolicy"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/insurance-policies/:id",
+    "description": "Delete an insurance policy",
+    "controller": "insuranceController.deleteInsurancePolicy"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/insurance-policies",
+    "description": "Get all insurance policies",
+    "controller": "insuranceController.getInsurancePolicies"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/categories",
+    "description": "Create a category",
+    "controller": "categoryController.createCategory"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/wallets/update",
+    "description": "Admin update wallet",
+    "controller": "walletController.adminUpdateWallet"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/shipments/recent",
+    "description": "Get recent shipments (admin)",
+    "controller": "shipmentController.getAdminRecentShipments"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/shipments/pending-count",
+    "description": "Get pending shipment count (admin)",
+    "controller": "shipmentController.getAdminPendingShipmentCount"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/shipments/total-count",
+    "description": "Get total shipment count (admin)",
+    "controller": "shipmentController.getAdminTotalShipmentCount"
+  },
+  {
+    "method": "POST",
+    "path": "/api/invoices/create",
+    "description": "Create an invoice (Admin only)",
+    "controller": "createInvoice"
+  }
+]

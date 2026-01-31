@@ -4,7 +4,7 @@ import { initializePayment, verifyPayment } from '../services/payment.service.js
 import { sendShipmentNotifications, sendWalletFundingSuccessEmail, sendWalletFundingFailureEmail } from '../utils/email.js';
 import { createNotification } from '../utils/notification.js';
 
-
+const FRONTEND_URL = process.env.FRONTEND_URL;
 const AMOUNT_DIVISOR = {
   paystack: 100,
   korapay: 1,
@@ -180,10 +180,8 @@ export const handlePaymentCallback = async (req, res) => {
   const paymentRef = reference || trxref;
 
   if (!paymentRef) {
-    return error(res, 'No payment reference provided', 400);
+    return res.redirect(`${FRONTEND_URL}/payment/status?status=error&message=No reference provided`);
   }
-
-  console.log(`[${provider.toUpperCase()}] Processing callback for ref: ${paymentRef}`);
 
   try {
     // 1. Verify payment
@@ -194,7 +192,7 @@ export const handlePaymentCallback = async (req, res) => {
 
     // If verification failed completely (no data) or it's not wallet funding, strictly enforce success
     if (!verification?.success && (!data || transactionType !== TRANSACTION_TYPES.WALLET_FUNDING)) {
-      return error(res, 'Payment verification failed', 400);
+      return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
     }
 
     // Early return for wallet funding (independent flow)
@@ -210,8 +208,7 @@ export const handlePaymentCallback = async (req, res) => {
     return await handleShipmentPayment(res, paymentRef, provider, data, metadata);
 
   } catch (err) {
-    console.error(`[${provider}] Payment callback failed:`, err);
-    return error(res, 'Internal error processing payment callback', 500);
+   return res.redirect(`${FRONTEND_URL}/payment/status?status=error&message=internal_server_error`);
   }
 };
 
@@ -221,7 +218,7 @@ export const handlePaymentCallback = async (req, res) => {
 async function handleWalletFunding(res, paymentRef, provider, verificationData, metadata) {
   const walletId = metadata.wallet_id;
   if (!walletId) {
-    return error(res, 'Missing wallet_id in metadata', 400);
+    return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
   }
 
   const amount = normalizeAmount(verificationData.amount, provider);
@@ -237,7 +234,7 @@ async function handleWalletFunding(res, paymentRef, provider, verificationData, 
 
     if (existing.rows.length > 0) {
       await query('ROLLBACK');
-      return error(res, 'Payment already processed', 409); // 409 Conflict is more appropriate
+      return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
     }
 
     // Get current balance for transaction record
@@ -248,7 +245,7 @@ async function handleWalletFunding(res, paymentRef, provider, verificationData, 
 
     if (walletBefore.rows.length === 0) {
       await query('ROLLBACK');
-      return error(res, 'Wallet not found', 404);
+      return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
     }
 
     const balanceBefore = Number(walletBefore.rows[0].balance);
@@ -315,12 +312,12 @@ async function handleWalletFunding(res, paymentRef, provider, verificationData, 
     // Correction: In handleWalletFunding, I have 'metadata' which contains 'user_id'.
     // Let's use metadata.user_id.
 
-    return success(res, 'Wallet funded successfully', { amount, walletId });
+   return res.redirect(`${FRONTEND_URL}/wallet?status=success&amount=${amount}&ref=${paymentRef}`);
 
   } catch (err) {
     await query('ROLLBACK');
     console.error('Wallet funding failed:', err);
-    return error(res, 'Failed to credit wallet', 500);
+    return res.redirect(`${FRONTEND_URL}/wallet?status=failed&ref=${paymentRef}`);
   }
 }
 
@@ -365,7 +362,7 @@ async function handleWalletFundingFailure(res, paymentRef, provider, verificatio
     }
     
     // We still return error response to the caller (likely a webhook or frontend redirect)
-    return error(res, 'Payment failed or declined', 400);
+    return res.redirect(`${FRONTEND_URL}/wallet?status=failed&ref=${paymentRef}`);
 }
 
 /**
@@ -375,7 +372,7 @@ async function handleShipmentPayment(res, paymentRef, provider, verificationData
   const trackingNumber = metadata.tracking_number;
 
   if (!trackingNumber) {
-    return error(res, 'Missing tracking_number in payment metadata', 400);
+    return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
   }
 
   const shipmentRes = await query(
@@ -390,13 +387,13 @@ async function handleShipmentPayment(res, paymentRef, provider, verificationData
   );
 
   if (shipmentRes.rows.length === 0) {
-    return error(res, 'Shipment not found', 404);
+    return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
   }
 
   const shipment = shipmentRes.rows[0];
 
   if (shipment.status === 'paid') {
-    return error(res, 'Shipment payment already confirmed', 409);
+    return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
   }
 
   // Prepare updated payment method object
@@ -421,13 +418,6 @@ async function handleShipmentPayment(res, paymentRef, provider, verificationData
       [updatedPaymentMethod, shipment.id]
     );
 
-    // Record tracking history
-    // await query(
-    //   `INSERT INTO tracking_statuses (shipment_id, status, description, created_at)
-    //    VALUES ($1, 'paid', $2, NOW())`,
-    //   [shipment.id, `Payment confirmed via ${provider}`]
-    // );
-
     await query('COMMIT');
 
     // Fire and forget notifications
@@ -451,14 +441,10 @@ async function handleShipmentPayment(res, paymentRef, provider, verificationData
         { shipmentId: shipment.id, trackingNumber: shipment.tracking_number, amount: verificationData.amount }
     );
 
-    return success(res, 'Shipment payment confirmed', {
-      trackingNumber: shipment.tracking_number,
-      status: 'paid',
-    });
+    return res.redirect(`${FRONTEND_URL}/shipments/${trackingNumber}?status=paid&ref=${paymentRef}`);
 
   } catch (err) {
     await query('ROLLBACK');
-    console.error('Shipment payment update failed:', err);
-    return error(res, 'Failed to update shipment status', 500);
+    return res.redirect(`${FRONTEND_URL}/payment/status?status=failed&ref=${paymentRef}`);
   }
 }

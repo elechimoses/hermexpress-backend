@@ -215,8 +215,8 @@ export const getRates = async (req, res) => {
     const { pickup_country_id, destination_country_id, pickup_city_id, destination_city_id, service_type } = req.query;
     let queryStr = `
       SELECT r.*, 
-             pc.name as pickup_country, dc.name as destination_country,
-             pcity.name as pickup_city, dcity.name as destination_city,
+             pc.name as pickup_country_name, dc.name as destination_country_name,
+             pcity.name as pickup_city_name, dcity.name as destination_city_name,
              so.name as option_name
       FROM shipping_rates r
       JOIN countries pc ON r.pickup_country_id = pc.id
@@ -233,5 +233,200 @@ export const getRates = async (req, res) => {
         return success(res, 'Rates fetched', result.rows);
     } catch(err) {
         return error(res, 'Failed to fetch rates', 500);
+    }
+};
+
+// --- Users ---
+
+export const getUsers = async (req, res) => {
+    try {
+        const queryStr = `
+            SELECT 
+                u.id, u.first_name, u.last_name, u.email, u.phone, u.account_type, 
+                u.is_verified, u.is_profile_complete, u.avatar_url, u.created_at,
+                w.balance as wallet_balance,
+                t.name as tier_name, t.discount_percentage as tier_discount,
+                (SELECT COUNT(*) FROM shipments s WHERE s.user_id = u.id) as shipment_count
+            FROM users u
+            LEFT JOIN wallets w ON u.id = w.user_id
+            LEFT JOIN user_tiers t ON u.tier_id = t.id
+            WHERE u.account_type != 'admin'
+            ORDER BY u.created_at DESC
+        `;
+        const result = await query(queryStr);
+        return success(res, 'Users fetched', result.rows);
+    } catch (err) {
+        console.error('Get Users Error:', err);
+        return error(res, 'Failed to fetch users', 500);
+    }
+};
+
+export const getUserProfile = async (req, res) => {
+    const { id } = req.params;
+    try {
+        // Fetch User + Basic Info
+        const userRes = await query(
+            `SELECT u.id, u.first_name, u.last_name, u.email, u.phone, u.country_dial_code, 
+                    u.account_type, u.is_verified, u.is_profile_complete, u.avatar_url,
+                    u.tier_id, t.name as tier_name, t.discount_percentage as tier_discount
+             FROM users u
+             LEFT JOIN user_tiers t ON u.tier_id = t.id
+             WHERE u.id = $1`, 
+            [id]
+        );
+        
+        if (userRes.rows.length === 0) return error(res, 'User not found', 404);
+        const user = userRes.rows[0];
+
+        let profileData = {};
+
+        if (user.is_profile_complete) {
+             const isBusiness = user.account_type?.toLowerCase() === 'business';
+             if (isBusiness) {
+                 const bizRes = await query('SELECT * FROM business_profiles WHERE user_id = $1', [id]);
+                 if (bizRes.rows.length > 0) profileData = bizRes.rows[0];
+             } else {
+                 const personalRes = await query('SELECT * FROM user_profiles WHERE user_id = $1', [id]);
+                 if (personalRes.rows.length > 0) profileData = personalRes.rows[0];
+             }
+        }
+
+        // Also get wallet and active shipments
+        const walletRes = await query('SELECT balance, currency, is_active FROM wallets WHERE user_id = $1', [id]);
+        const shipmentCountRes = await query('SELECT COUNT(*) FROM shipments WHERE user_id = $1', [id]);
+
+        return success(res, 'User profile fetched', { 
+            user, 
+            profile: profileData,
+            wallet: walletRes.rows[0] || { balance: 0, currency: 'NGN', is_active: false },
+            shipment_count: parseInt(shipmentCountRes.rows[0].count)
+        });
+
+    } catch (err) {
+        console.error('Get User Profile Error:', err);
+        return error(res, 'Failed to fetch user profile', 500);
+    }
+};
+
+
+// Contact Messages
+export const getContactMessages = async (req, res) => {
+    try {
+        const result = await query('SELECT * FROM contact_messages ORDER BY created_at DESC');
+        return success(res, 'Contact messages fetched successfully', result.rows);
+    } catch (err) {
+        console.error('Get Contact Messages Error:', err);
+        return error(res, 'Failed to fetch contact messages', 500);
+    }
+};
+
+export const markContactMessageAsRead = async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body; // 'read', 'unread', 'replied'
+    try {
+        const result = await query(
+            'UPDATE contact_messages SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+            [status || 'read', id]
+        );
+        if (result.rows.length === 0) return error(res, 'Message not found', 404);
+        return success(res, 'Message status updated', result.rows[0]);
+    } catch (err) {
+        console.error('Update Contact Message Error:', err);
+        return error(res, 'Failed to update message status', 500);
+    }
+};
+
+
+// Settings
+export const getSettings = async (req, res) => {
+    try {
+        const result = await query('SELECT * FROM settings ORDER BY key ASC');
+        return success(res, 'Settings fetched successfully', result.rows);
+    } catch (err) {
+        console.error('Get Settings Error:', err);
+        return error(res, 'Failed to fetch settings', 500);
+    }
+};
+
+export const updateSetting = async (req, res) => {
+    const { key, value } = req.body;
+    if (!key || value === undefined) return error(res, 'Key and value are required', 400);
+
+    try {
+        const result = await query(
+            'UPDATE settings SET value = $1, updated_at = NOW() WHERE key = $2 RETURNING *',
+            [value, key]
+        );
+        if (result.rows.length === 0) return error(res, 'Setting not found', 404);
+        return success(res, 'Setting updated successfully', result.rows[0]);
+    } catch (err) {
+        console.error('Update Setting Error:', err);
+        return error(res, 'Failed to update setting', 500);
+    }
+};
+
+// Tier Management
+export const getTiers = async (req, res) => {
+    try {
+        const result = await query('SELECT * FROM user_tiers ORDER BY level ASC');
+        return success(res, 'Tiers fetched successfully', result.rows);
+    } catch (err) {
+        console.error('Get Tiers Error:', err);
+        return error(res, 'Failed to fetch tiers', 500);
+    }
+};
+
+export const createTier = async (req, res) => {
+    const { name, level, min_shipments, discount_percentage } = req.body;
+    try {
+        const result = await query(
+            'INSERT INTO user_tiers (name, level, min_shipments, discount_percentage) VALUES ($1, $2, $3, $4) RETURNING *',
+            [name, level, min_shipments, discount_percentage]
+        );
+        return success(res, 'Tier created successfully', result.rows[0], 201);
+    } catch (err) {
+        console.error('Create Tier Error:', err);
+        return error(res, 'Failed to create tier', 500);
+    }
+};
+
+export const updateTier = async (req, res) => {
+    const { id } = req.params;
+    const { name, level, min_shipments, discount_percentage, is_active } = req.body;
+    try {
+        const result = await query(
+            'UPDATE user_tiers SET name = $1, level = $2, min_shipments = $3, discount_percentage = $4, is_active = $5, updated_at = NOW() WHERE id = $6 RETURNING *',
+            [name, level, min_shipments, discount_percentage, is_active, id]
+        );
+        if (result.rows.length === 0) return error(res, 'Tier not found', 404);
+        return success(res, 'Tier updated successfully', result.rows[0]);
+    } catch (err) {
+        console.error('Update Tier Error:', err);
+        return error(res, 'Failed to update tier', 500);
+    }
+};
+
+export const deleteTier = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await query('DELETE FROM user_tiers WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) return error(res, 'Tier not found', 404);
+        return success(res, 'Tier deleted successfully');
+    } catch (err) {
+        console.error('Delete Tier Error:', err);
+        return error(res, 'Failed to delete tier', 500);
+    }
+};
+
+export const setUserTier = async (req, res) => {
+    const { userId } = req.params;
+    const { tierId } = req.body;
+    try {
+        const userRes = await query('UPDATE users SET tier_id = $1 WHERE id = $2 RETURNING *', [tierId, userId]);
+        if (userRes.rows.length === 0) return error(res, 'User not found', 404);
+        return success(res, 'User tier updated successfully', { userId, tierId });
+    } catch (err) {
+        console.error('Set User Tier Error:', err);
+        return error(res, 'Failed to set user tier', 500);
     }
 };

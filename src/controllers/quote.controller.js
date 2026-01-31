@@ -187,3 +187,14 @@ export const getQuote = async (req, res) => {
     return error(res, 'Failed to calculate shipping quote', 500);
   }
 };
+
+export const getChinaRateDescription = async (req, res) => {
+    try {
+        const result = await query("SELECT value FROM settings WHERE key = 'china_rate_description'");
+        const description = result.rows[0]?.value || 'Rate not available';
+        return success(res, 'China rate description fetched', { description });
+    } catch (err) {
+        console.error('Get China Rate Error:', err);
+        return error(res, 'Failed to fetch China rate description', 500);
+    }
+};
