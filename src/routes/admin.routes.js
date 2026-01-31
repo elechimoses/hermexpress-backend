@@ -8,6 +8,7 @@ import * as insuranceController from '../controllers/insurance.controller.js';
 import * as categoryController from '../controllers/category.controller.js';
 import * as walletController from '../controllers/wallet.controller.js';
 import * as shipmentController from '../controllers/shipment.controller.js';
+import * as invoiceController from '../controllers/invoice.controller.js';
 import { upload } from '../middleware/upload.middleware.js';
 
 // Apply middleware to all admin routes
@@ -49,12 +50,15 @@ router.put('/insurance-policies/:id', insuranceController.updateInsurancePolicy)
 router.delete('/insurance-policies/:id', insuranceController.deleteInsurancePolicy);
 router.get('/insurance-policies', insuranceController.getInsurancePolicies);
 
-// Categories
+
 router.post('/categories', categoryController.createCategory);
 
 // Wallets
 
 router.post('/wallets/update', walletController.adminUpdateWallet);
+
+router.post('/invoices/create', invoiceController.createInvoice);
+router.get('/invoices', invoiceController.getInvoices);
 
 // Shipments (Admin Dashboard)
 

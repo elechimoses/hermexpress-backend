@@ -5,7 +5,7 @@ import { completeProfile, getProfile, updateProfile } from '../controllers/profi
 import { saveAddress, getAddresses } from '../controllers/address.controller.js';
 import { getWallet, getTransactions, fundWallet } from '../controllers/wallet.controller.js';
 import { getNotifications, markRead, markAllRead } from '../controllers/notification.controller.js';
-
+import * as invoiceController from '../controllers/invoice.controller.js';
 const router = express.Router();
 
 // Profile Management
@@ -22,6 +22,7 @@ router.get('/addresses', getAddresses);
 router.get('/wallet', getWallet);
 router.get('/transactions', getTransactions);
 router.post('/fund', fundWallet);
+router.get('/invoices', invoiceController.getInvoices);
 
 // Notifications
 router.get('/notifications', getNotifications);

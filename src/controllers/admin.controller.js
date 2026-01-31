@@ -315,7 +315,7 @@ export const getContactMessages = async (req, res) => {
         const result = await query('SELECT * FROM contact_messages ORDER BY created_at DESC');
         return success(res, 'Contact messages fetched successfully', result.rows);
     } catch (err) {
-        console.error('Get Contact Messages Error:', err);
+      
         return error(res, 'Failed to fetch contact messages', 500);
     }
 };
@@ -331,7 +331,7 @@ export const markContactMessageAsRead = async (req, res) => {
         if (result.rows.length === 0) return error(res, 'Message not found', 404);
         return success(res, 'Message status updated', result.rows[0]);
     } catch (err) {
-        console.error('Update Contact Message Error:', err);
+      
         return error(res, 'Failed to update message status', 500);
     }
 };
@@ -343,7 +343,7 @@ export const getSettings = async (req, res) => {
         const result = await query('SELECT * FROM settings ORDER BY key ASC');
         return success(res, 'Settings fetched successfully', result.rows);
     } catch (err) {
-        console.error('Get Settings Error:', err);
+      
         return error(res, 'Failed to fetch settings', 500);
     }
 };
@@ -360,7 +360,7 @@ export const updateSetting = async (req, res) => {
         if (result.rows.length === 0) return error(res, 'Setting not found', 404);
         return success(res, 'Setting updated successfully', result.rows[0]);
     } catch (err) {
-        console.error('Update Setting Error:', err);
+      
         return error(res, 'Failed to update setting', 500);
     }
 };
@@ -371,7 +371,7 @@ export const getTiers = async (req, res) => {
         const result = await query('SELECT * FROM user_tiers ORDER BY level ASC');
         return success(res, 'Tiers fetched successfully', result.rows);
     } catch (err) {
-        console.error('Get Tiers Error:', err);
+      
         return error(res, 'Failed to fetch tiers', 500);
     }
 };
@@ -385,7 +385,7 @@ export const createTier = async (req, res) => {
         );
         return success(res, 'Tier created successfully', result.rows[0], 201);
     } catch (err) {
-        console.error('Create Tier Error:', err);
+        
         return error(res, 'Failed to create tier', 500);
     }
 };
@@ -401,7 +401,7 @@ export const updateTier = async (req, res) => {
         if (result.rows.length === 0) return error(res, 'Tier not found', 404);
         return success(res, 'Tier updated successfully', result.rows[0]);
     } catch (err) {
-        console.error('Update Tier Error:', err);
+        
         return error(res, 'Failed to update tier', 500);
     }
 };
@@ -413,7 +413,7 @@ export const deleteTier = async (req, res) => {
         if (result.rows.length === 0) return error(res, 'Tier not found', 404);
         return success(res, 'Tier deleted successfully');
     } catch (err) {
-        console.error('Delete Tier Error:', err);
+        
         return error(res, 'Failed to delete tier', 500);
     }
 };
@@ -426,7 +426,7 @@ export const setUserTier = async (req, res) => {
         if (userRes.rows.length === 0) return error(res, 'User not found', 404);
         return success(res, 'User tier updated successfully', { userId, tierId });
     } catch (err) {
-        console.error('Set User Tier Error:', err);
+        
         return error(res, 'Failed to set user tier', 500);
     }
 };
