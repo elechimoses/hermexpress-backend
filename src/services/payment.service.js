@@ -25,10 +25,12 @@ export const initializePayment = async (data) => {
         const secretKey = config.secretKey || process.env.PAYSTACK_SECRET_KEY;
         if (!secretKey) throw new Error('Paystack Secret Key not configured');
 
+        const reference = `${trackingNumber}_${uuidv4().slice(0, 5)}`;
+
         const payload = {
             email: email || 'customer@example.com',
             amount: Math.round(amount * 100), // kobo
-            reference: trackingNumber,
+            reference: reference,
             callback_url: `${APP_URL}/api/payment/callback/paystack`,
             metadata: {
                 tracking_number: trackingNumber,

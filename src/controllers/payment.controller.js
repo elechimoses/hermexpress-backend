@@ -441,7 +441,7 @@ async function handleShipmentPayment(res, paymentRef, provider, verificationData
         { shipmentId: shipment.id, trackingNumber: shipment.tracking_number, amount: verificationData.amount }
     );
 
-    return res.redirect(`${FRONTEND_URL}/shipments/${trackingNumber}?status=paid&ref=${paymentRef}`);
+    return res.redirect(`${FRONTEND_URL}/shipments?status=paid&ref=${paymentRef}`);
 
   } catch (err) {
     await query('ROLLBACK');
