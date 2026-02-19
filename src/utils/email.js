@@ -28,7 +28,7 @@ export const sendVerificationEmail = async (to, code) => {
   });
 
   const mailOptions = {
-    from: '"Hermexpress" <no-reply@hermexpress.com>',
+    from: '"Hermexpress" <no-reply@hermesexp.com>',
     to,
     subject: 'Your Verification Code - Hermexpress',
     html: htmlContent,
@@ -58,7 +58,7 @@ export const sendPasswordResetEmail = async (to, code) => {
   });
 
   const mailOptions = {
-    from: '"Hermexpress" <no-reply@hermexpress.com>',
+    from: '"Hermexpress" <no-reply@hermesexp.com>',
     to,
     subject: 'Password Reset Request - Hermexpress',
     html: htmlContent,

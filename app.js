@@ -23,6 +23,8 @@ app.use(cors());
 // Serve Static Uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+app.set('trust proxy', 1);
+
 import { apiLimiter } from './src/middleware/rateLimit.middleware.js';
 app.use('/api', apiLimiter);
 app.use('/auth', apiLimiter);
@@ -43,10 +45,10 @@ app.use('/', indexRouter);
 
 // 404 Handler
 app.use('*', (req, res) => {
-    res.status(404).json({
-        status: false,
-        message: 'Route not found'
-    });
+  res.status(404).json({
+    status: false,
+    message: 'Route not found'
+  });
 });
 
 const PORT = process.env.PORT || 3000;
