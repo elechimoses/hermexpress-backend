@@ -316,18 +316,45 @@ export const calculateRates = async (req, res) => {
 
     try {
         // --- 2. Resolve Locations ---
-        const getCountryId = async (countryName, countryId) => {
-            if (countryId) return countryId;
-            if (!countryName) return null;
-            const res = await query('SELECT id FROM countries WHERE LOWER(name) = LOWER($1) AND is_active = TRUE', [countryName]);
-            return res.rows.length > 0 ? res.rows[0].id : null;
+        const getCountryDetails = async (countryName, countryId) => {
+            const params = [];
+            let whereClause = '';
+
+            if (countryId && countryId !== '') {
+                params.push(countryId);
+                whereClause = 'id = $1';
+            } else if (countryName) {
+                params.push(countryName);
+                whereClause = 'LOWER(name) = LOWER($1)';
+            } else {
+                return null;
+            }
+
+            const res = await query(
+                `SELECT id, name, can_import_from, can_export_to, region_id 
+                 FROM countries 
+                 WHERE ${whereClause} AND is_active = TRUE`,
+                params
+            );
+            return res.rows.length > 0 ? res.rows[0] : null;
         };
 
-        const pickupCountryId = await getCountryId(sender.country, sender.countryId);
-        const destinationCountryId = await getCountryId(receiver.country, receiver.countryId);
+        const pickupCountry = await getCountryDetails(sender.country, sender.countryId);
+        const destinationCountry = await getCountryDetails(receiver.country, receiver.countryId);
 
-        if (!pickupCountryId) return error(res, `Invalid or unsupported pickup country: ${sender.country}`, 400);
-        if (!destinationCountryId) return error(res, `Invalid or unsupported destination country: ${receiver.country}`, 400);
+        if (!pickupCountry) return error(res, `Invalid or unsupported pickup country: ${sender.country || sender.countryId}`, 400);
+        if (!destinationCountry) return error(res, `Invalid or unsupported destination country: ${receiver.country || receiver.countryId}`, 400);
+
+        // Capability Checks
+        if (serviceType === 'import' && !pickupCountry.can_import_from) {
+            return error(res, `Pickup country ${pickupCountry.name} does not support import services`, 400);
+        }
+        if (serviceType === 'export' && !destinationCountry.can_export_to) {
+            return error(res, `Destination country ${destinationCountry.name} does not support export services`, 400);
+        }
+
+        const pickupCountryId = pickupCountry.id;
+        const destinationCountryId = destinationCountry.id;
 
         // --- 3. Aggregate Weight & Value ---
         let totalWeight = 0;
