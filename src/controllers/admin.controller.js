@@ -348,7 +348,7 @@ export const getOptions = async (req, res) => {
             JOIN (
                 SELECT 
                     shipment_option_id, region_id, service_type,
-                    JSON_AGG(JSON_BUILD_OBJECT('weight_kg', weight_kg, 'amount', weight_kg) ORDER BY weight_kg ASC) as rates
+                    JSON_AGG(JSON_BUILD_OBJECT('weight_kg', weight_kg, 'amount', amount) ORDER BY weight_kg ASC) as rates
                 FROM shipment_option_region_rates
                 GROUP BY shipment_option_id, region_id, service_type
             ) rr ON s.id = rr.shipment_option_id
