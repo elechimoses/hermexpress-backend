@@ -236,23 +236,26 @@ export const createOption = async (req, res) => {
         }
 
         // 2. Process Multi-region rates
-        for (const regionBlock of rates) {
-            const region_id = regionBlock.region_id;
-            const regionRates = regionBlock.rates || regionBlock.data || [];
-
-            if (!region_id) continue;
-
+        if (rates && Array.isArray(rates) && service_type) {
+            // Destruction sync: Delete all existing rates for this service type first
             await query(
-                'DELETE FROM shipment_option_region_rates WHERE shipment_option_id = $1 AND region_id = $2 AND service_type = $3',
-                [optionId, region_id, service_type]
+                'DELETE FROM shipment_option_region_rates WHERE shipment_option_id = $1 AND service_type = $2',
+                [optionId, service_type]
             );
 
-            for (const rate of regionRates) {
-                await query(
-                    `INSERT INTO shipment_option_region_rates (shipment_option_id, region_id, weight_kg, amount, service_type)
-                     VALUES ($1, $2, $3, $4, $5)`,
-                    [optionId, region_id, rate.weight_kg, rate.amount, service_type]
-                );
+            for (const regionBlock of rates) {
+                const region_id = regionBlock.region_id;
+                const regionRates = regionBlock.rates || regionBlock.data || [];
+
+                if (!region_id) continue;
+
+                for (const rate of regionRates) {
+                    await query(
+                        `INSERT INTO shipment_option_region_rates (shipment_option_id, region_id, weight_kg, amount, service_type)
+                         VALUES ($1, $2, $3, $4, $5)`,
+                        [optionId, region_id, rate.weight_kg, rate.amount, service_type]
+                    );
+                }
             }
         }
 
@@ -294,16 +297,17 @@ export const updateOption = async (req, res) => {
 
         // 2. Update Rates if provided
         if (rates && Array.isArray(rates) && service_type) {
+            // Destruction sync: Delete all existing rates for this service type first
+            await query(
+                'DELETE FROM shipment_option_region_rates WHERE shipment_option_id = $1 AND service_type = $2',
+                [id, service_type]
+            );
+
             for (const regionBlock of rates) {
                 const region_id = regionBlock.region_id;
                 const regionRates = regionBlock.rates || regionBlock.data || [];
 
                 if (!region_id) continue;
-
-                await query(
-                    'DELETE FROM shipment_option_region_rates WHERE shipment_option_id = $1 AND region_id = $2 AND service_type = $3',
-                    [id, region_id, service_type]
-                );
 
                 for (const rate of regionRates) {
                     await query(
