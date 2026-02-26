@@ -23,6 +23,13 @@ router.post('/countries', adminController.createCountry);
 router.put('/countries/:id', adminController.updateCountry);
 router.get('/countries', adminController.getCountries);
 
+// Regions
+router.post('/regions', adminController.createRegion);
+router.get('/regions', adminController.getRegions);
+router.get('/region-rates', adminController.getRegionRates);
+router.put('/regions/:id', adminController.updateRegion);
+router.delete('/regions/:id', adminController.deleteRegion);
+
 // Cities
 router.post('/cities', adminController.createCity);
 router.put('/cities/:id', adminController.updateCity);
@@ -33,11 +40,6 @@ router.post('/options', adminController.createOption);
 router.put('/options/:id', adminController.updateOption);
 router.get('/options', adminController.getOptions);
 
-// Rates
-router.post('/rates', adminController.createRate);
-router.put('/rates/:id', adminController.updateRate);
-router.delete('/rates/:id', adminController.deleteRate);
-router.get('/rates', adminController.getRates);
 
 // Payment Methods
 router.get('/payment-methods', paymentController.getAllPaymentMethods);

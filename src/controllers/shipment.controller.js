@@ -27,7 +27,7 @@ export const bookShipment = async (req, res) => {
     if (!sender || !receiver || !packages || packages.length === 0 || !serviceOptionId || !serviceType) {
         return error(res, 'Missing required booking fields', 400);
     }
-    
+
     // Payment Method Validation (Required for booking)
     // Client should send paymentMethodId for the selected provider.
     // If not sent, we could default or error. Let's error since prompt implies it's part of payload.
@@ -43,7 +43,7 @@ export const bookShipment = async (req, res) => {
         await client.query('BEGIN');
 
         // --- 2. Calculate/Verify Pricing ---
-        
+
         // A. Calculate Total Weight & Value
         let totalWeight = 0;
         let totalVolumetric = 0;
@@ -53,7 +53,7 @@ export const bookShipment = async (req, res) => {
             const w = Number(pkg.weight);
             const v = Number(pkg.value) || 0;
             const q = Number(pkg.quantity) || 1;
-            
+
             // Volumetric: (L x W x H) / 5000
             if (pkg.length && pkg.width && pkg.height) {
                 const vol = (Number(pkg.length) * Number(pkg.width) * Number(pkg.height)) / 5000;
@@ -65,29 +65,29 @@ export const bookShipment = async (req, res) => {
 
         const chargeableWeight = Math.max(totalWeight, totalVolumetric);
 
-        // B. Get Shipping Rate
+        // B. Get Shipping Rate (Region-Based)
+        const targetCountryId = serviceType === 'export' ? destinationCountryId : pickupCountryId;
+
         const rateQuery = `
-            SELECT r.* 
-            FROM shipping_rates r
-            JOIN shipment_options o ON r.shipment_option_id = o.id
-            WHERE r.shipment_option_id = $1
-            AND r.pickup_country_id = $2
-            AND r.destination_country_id = $3
-            AND (r.pickup_city_id IS NULL OR r.pickup_city_id = $4)
-            AND (r.destination_city_id IS NULL OR r.destination_city_id = $5)
-            AND r.service_type = $6
-            AND $7 >= r.min_weight
-            AND $7 <= r.max_weight
-            ORDER BY ((r.pickup_city_id IS NOT NULL)::int + (r.destination_city_id IS NOT NULL)::int) DESC
+            SELECT rr.*, r.name as region_name
+            FROM shipment_option_region_rates rr
+            JOIN shipment_options o ON rr.shipment_option_id = o.id
+            JOIN countries c ON c.id = $2
+            JOIN regions r ON c.region_id = r.id
+            WHERE rr.shipment_option_id = $1
+            AND rr.region_id = c.region_id
+            AND rr.service_type = $3
+            AND rr.weight_kg >= $4
+            AND o.is_active = TRUE
+            ORDER BY rr.weight_kg ASC
             LIMIT 1
         `;
 
         const queryParams = [
-            serviceOptionId, pickupCountryId, destinationCountryId, 
-            pickupCityId || null, destinationCityId || null, 
+            serviceOptionId, targetCountryId,
             serviceType, chargeableWeight
         ];
-        
+
         const rateRes = await client.query(rateQuery, queryParams);
 
         if (rateRes.rows.length === 0) {
@@ -96,7 +96,7 @@ export const bookShipment = async (req, res) => {
         }
 
         const rate = rateRes.rows[0];
-        let shippingFee = Number(rate.base_fee) + (chargeableWeight * Number(rate.rate_per_kg));
+        let shippingFee = Number(rate.amount);
 
         // --- TIER DISCOUNT LOGIC ---
         let tierDiscount = 0;
@@ -122,18 +122,18 @@ export const bookShipment = async (req, res) => {
         if (insurancePolicyId) {
             const insRes = await client.query('SELECT * FROM insurance_policies WHERE id = $1 AND is_active = TRUE', [insurancePolicyId]);
             if (insRes.rows.length === 0) {
-                 await client.query('ROLLBACK');
-                 return error(res, 'Invalid insurance policy', 400);
+                await client.query('ROLLBACK');
+                return error(res, 'Invalid insurance policy', 400);
             }
             const policy = insRes.rows[0];
-            
+
             if (policy.fee_type === 'flat') {
                 insuranceFee = Number(policy.fee_amount);
             } else {
                 insuranceFee = (totalValue * (Number(policy.fee_amount) / 100));
             }
-             if (Number(policy.min_fee) > 0 && insuranceFee < Number(policy.min_fee) && policy.fee_type === 'percentage') {
-                 insuranceFee = Number(policy.min_fee);
+            if (Number(policy.min_fee) > 0 && insuranceFee < Number(policy.min_fee) && policy.fee_type === 'percentage') {
+                insuranceFee = Number(policy.min_fee);
             }
         }
 
@@ -142,8 +142,8 @@ export const bookShipment = async (req, res) => {
         // --- 2.5 Verify Payment Method & Snapshot ---
         const paymentRes = await client.query('SELECT * FROM payment_methods WHERE id = $1 AND is_active = TRUE', [methodId]);
         if (paymentRes.rows.length === 0) {
-             await client.query('ROLLBACK');
-             return error(res, 'Invalid or inactive payment method', 400);
+            await client.query('ROLLBACK');
+            return error(res, 'Invalid or inactive payment method', 400);
         }
         const paymentMethod = paymentRes.rows[0];
         // Snapshot: { provider: 'bank_transfer', name: 'Bank...', config: { ... } }
@@ -167,16 +167,16 @@ export const bookShipment = async (req, res) => {
             // Lock Wallet Row
             const walletRes = await client.query('SELECT * FROM wallets WHERE user_id = $1 FOR UPDATE', [userId]);
             if (walletRes.rows.length === 0 || !walletRes.rows[0].is_active) {
-                 await client.query('ROLLBACK');
-                 return error(res, 'Wallet not active or not found', 400);
+                await client.query('ROLLBACK');
+                return error(res, 'Wallet not active or not found', 400);
             }
 
             const wallet = walletRes.rows[0];
             const balance = Number(wallet.balance);
 
             if (balance < totalPrice) {
-                 await client.query('ROLLBACK');
-                 return error(res, 'Insufficient wallet balance', 400);
+                await client.query('ROLLBACK');
+                return error(res, 'Insufficient wallet balance', 400);
             }
 
             // Debit Wallet
@@ -184,7 +184,7 @@ export const bookShipment = async (req, res) => {
             await client.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [newBalance, wallet.id]);
 
             initialStatus = 'paid';
-            
+
             // Prepare transaction data
             walletTransactionData = {
                 walletId: wallet.id,
@@ -218,18 +218,18 @@ export const bookShipment = async (req, res) => {
         // --- WALLET PART 2: Record Transaction ---
         if (walletTransactionData) {
             await client.query(
-                 `INSERT INTO wallet_transactions 
+                `INSERT INTO wallet_transactions 
                   (wallet_id, type, amount, balance_before, balance_after, reference, description, status, meta_data)
                   VALUES ($1, 'debit', $2, $3, $4, $5, $6, 'success', $7)`,
-                  [
-                      walletTransactionData.walletId, 
-                      walletTransactionData.amount, 
-                      walletTransactionData.balanceBefore, 
-                      walletTransactionData.balanceAfter, 
-                      trackingNumber, 
-                      'Payment for Shipment', 
-                      JSON.stringify({ shipment_id: shipmentId })
-                  ]
+                [
+                    walletTransactionData.walletId,
+                    walletTransactionData.amount,
+                    walletTransactionData.balanceBefore,
+                    walletTransactionData.balanceAfter,
+                    trackingNumber,
+                    'Payment for Shipment',
+                    JSON.stringify({ shipment_id: shipmentId })
+                ]
             );
         }
 
@@ -338,7 +338,7 @@ export const calculateRates = async (req, res) => {
             const w = Number(pkg.weight);
             const v = Number(pkg.value) || 0;
             const q = Number(pkg.quantity) || 1;
-            
+
             if (pkg.length && pkg.width && pkg.height) {
                 const vol = (Number(pkg.length) * Number(pkg.width) * Number(pkg.height)) / 5000;
                 totalVolumetric += (vol * q);
@@ -349,26 +349,29 @@ export const calculateRates = async (req, res) => {
 
         const chargeableWeight = Math.max(totalWeight, totalVolumetric);
 
-        // --- 4. Fetch Shipping Rates ---
+        // --- 4. Fetch Shipping Rates (Region-Based) ---
+        const targetCountryId = serviceType === 'export' ? destinationCountryId : pickupCountryId;
+
         const rateQuery = `
-            SELECT DISTINCT ON (r.shipment_option_id)
-                r.id, r.base_fee, r.rate_per_kg, r.min_weight, r.max_weight,
+            SELECT DISTINCT ON (rr.shipment_option_id)
+                rr.id, rr.amount, rr.weight_kg,
                 o.id as option_id, o.name AS option_name, o.description AS option_desc, 
-                o.min_days, o.max_days
-            FROM shipping_rates r
-            JOIN shipment_options o ON r.shipment_option_id = o.id
+                o.min_days, o.max_days,
+                r.name as region_name, r.id as region_id
+            FROM shipment_option_region_rates rr
+            JOIN shipment_options o ON rr.shipment_option_id = o.id
+            JOIN countries c ON c.id = $1
+            JOIN regions r ON c.region_id = r.id
             WHERE 
-                r.pickup_country_id = $1
-                AND r.destination_country_id = $2
-                AND r.service_type = $3
-                AND $4 >= r.min_weight
-                AND $4 <= r.max_weight
+                rr.region_id = c.region_id
+                AND rr.service_type = $2
+                AND rr.weight_kg >= $3
                 AND o.is_active = true
-            ORDER BY r.shipment_option_id, ((r.pickup_city_id IS NOT NULL)::int + (r.destination_city_id IS NOT NULL)::int) DESC
+            ORDER BY rr.shipment_option_id, rr.weight_kg ASC
         `;
 
         const ratesRes = await query(rateQuery, [
-            pickupCountryId, destinationCountryId, serviceType, chargeableWeight
+            targetCountryId, serviceType, chargeableWeight
         ]);
 
         // --- TIER DISCOUNT LOGIC for QUOTES ---
@@ -388,9 +391,7 @@ export const calculateRates = async (req, res) => {
         }
 
         const quotes = ratesRes.rows.map(r => {
-            const base = Number(r.base_fee);
-            const perKg = Number(r.rate_per_kg);
-            let total = base + (chargeableWeight * perKg);
+            let total = Number(r.amount);
 
             if (tierDiscount > 0) {
                 total -= (total * (tierDiscount / 100));
@@ -417,8 +418,8 @@ export const calculateRates = async (req, res) => {
             } else {
                 fee = (totalValue * (Number(p.fee_amount) / 100));
             }
-             if (Number(p.min_fee) > 0 && fee < Number(p.min_fee) && p.fee_type === 'percentage') {
-                 fee = Number(p.min_fee);
+            if (Number(p.min_fee) > 0 && fee < Number(p.min_fee) && p.fee_type === 'percentage') {
+                fee = Number(p.min_fee);
             }
 
             return {
@@ -439,7 +440,10 @@ export const calculateRates = async (req, res) => {
                 totalVolumetric,
                 chargeableWeight,
                 totalValue,
-                currency: 'NGN'
+                currency: 'NGN',
+                service_type: serviceType,
+                region_id: ratesRes.rows[0]?.region_id || null,
+                region_name: ratesRes.rows[0]?.region_name || null
             }
         });
 
@@ -492,7 +496,7 @@ export const getUserPendingShipmentCount = async (req, res) => {
         );
         return success(res, 'Pending shipment count fetched', { count: Number(result.rows[0].count) });
     } catch (err) {
-         console.error('Get User Pending Count Error:', err);
+        console.error('Get User Pending Count Error:', err);
         return error(res, 'Failed to get pending shipment count', 500);
     }
 };
@@ -506,7 +510,7 @@ export const getUserTotalShipmentCount = async (req, res) => {
         );
         return success(res, 'Total shipment count fetched', { count: Number(result.rows[0].count) });
     } catch (err) {
-         console.error('Get User Total Count Error:', err);
+        console.error('Get User Total Count Error:', err);
         return error(res, 'Failed to get total shipment count', 500);
     }
 };
@@ -535,7 +539,7 @@ export const getAdminRecentShipments = async (req, res) => {
             receiver: s.receiver_name,
             origin: s.origin_city && s.origin_country ? `${s.origin_city}, ${s.origin_country}` : 'N/A',
             destination: s.dest_city && s.dest_country ? `${s.dest_city}, ${s.dest_country}` : 'N/A',
-            senderName: s.first_name ? `${s.first_name} ${s.last_name}` : 'Guest/Unknown', 
+            senderName: s.first_name ? `${s.first_name} ${s.last_name}` : 'Guest/Unknown',
             amount: s.total_price,
             createdAt: s.created_at,
             status: s.status
@@ -549,25 +553,25 @@ export const getAdminRecentShipments = async (req, res) => {
 };
 
 export const getAdminPendingShipmentCount = async (req, res) => {
-     try {
+    try {
         const result = await query(
             `SELECT COUNT(*) as count FROM shipments WHERE status = 'pending'`
         );
         return success(res, 'All pending shipment count fetched', { count: Number(result.rows[0].count) });
     } catch (err) {
-         console.error('Get Admin Pending Count Error:', err);
+        console.error('Get Admin Pending Count Error:', err);
         return error(res, 'Failed to get all pending shipment count', 500);
     }
 };
 
 export const getAdminTotalShipmentCount = async (req, res) => {
-     try {
+    try {
         const result = await query(
             `SELECT COUNT(*) as count FROM shipments`
         );
         return success(res, 'All total shipment count fetched', { count: Number(result.rows[0].count) });
     } catch (err) {
-         console.error('Get Admin Total Count Error:', err);
+        console.error('Get Admin Total Count Error:', err);
         return error(res, 'Failed to get all total shipment count', 500);
     }
 };
@@ -600,7 +604,7 @@ export const updateShipmentStatus = async (req, res) => {
     const { id } = req.params;
     const { status, description } = req.body;
     const validStatuses = ['pending', 'paid', 'processing', 'pickup', 'in_transit', 'delivered', 'cancelled'];
-    
+
     if (!validStatuses.includes(status)) {
         return error(res, 'Invalid status', 400);
     }
@@ -608,7 +612,7 @@ export const updateShipmentStatus = async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        
+
         // Update shipment
         const updateRes = await client.query(
             'UPDATE shipments SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
@@ -629,7 +633,7 @@ export const updateShipmentStatus = async (req, res) => {
         // --- AUTOMATIC TIER UPGRADE LOGIC ---
         if (status === 'delivered' && updateRes.rows[0].user_id) {
             const userId = updateRes.rows[0].user_id;
-            
+
             // 1. Get total delivered shipments for this user
             const deliveredRes = await client.query(
                 `SELECT COUNT(*) FROM shipments WHERE user_id = $1 AND status = 'delivered'`,
@@ -647,16 +651,16 @@ export const updateShipmentStatus = async (req, res) => {
 
             if (qualifyingTierRes.rows.length > 0) {
                 const newTier = qualifyingTierRes.rows[0];
-                
+
                 // 3. Update user's tier if it's different/higher
                 // First get current tier level to ensure we only upgrade (or at least check)
                 const userTierRes = await client.query(
                     `SELECT t.level FROM users u LEFT JOIN user_tiers t ON u.tier_id = t.id WHERE u.id = $1`,
                     [userId]
                 );
-                
+
                 const currentLevel = userTierRes.rows[0]?.level || 0;
-                
+
                 if (newTier.level > currentLevel) {
                     await client.query(
                         'UPDATE users SET tier_id = $1 WHERE id = $2',

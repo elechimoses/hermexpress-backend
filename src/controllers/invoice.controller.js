@@ -18,8 +18,8 @@ export const createInvoice = async (req, res) => {
                     u.email, u.first_name, u.last_name
              FROM shipments s
              JOIN users u ON s.user_id = u.id
-             WHERE s.id = $1`,
-            [shipmentId]
+             WHERE s.id::text = $1 OR s.tracking_number = $1`,
+            [String(shipmentId)]
         );
 
         if (shipmentRes.rows.length === 0) {
@@ -36,7 +36,7 @@ export const createInvoice = async (req, res) => {
              RETURNING id, created_at`,
             [shipment.id, shipment.user_id, amount, reason, due]
         );
-        
+
         const invoice = invoiceRes.rows[0];
 
         // 3. Send Email
@@ -90,21 +90,21 @@ export const getInvoices = async (req, res) => {
         // Filter by User (if not admin, or if admin wants specific user)
         // Actually, if user, FORCE own invoices.
         if (!isAdmin) {
-             conditions.push(`i.user_id = $${params.length + 1}`);
-             params.push(userId);
+            conditions.push(`i.user_id = $${params.length + 1}`);
+            params.push(userId);
         } else if (req.query.userId) { // Admin filtering by user
-             conditions.push(`i.user_id = $${params.length + 1}`);
-             params.push(req.query.userId);
+            conditions.push(`i.user_id = $${params.length + 1}`);
+            params.push(req.query.userId);
         }
 
         if (shipmentId) {
-             conditions.push(`i.shipment_id = $${params.length + 1}`);
-             params.push(shipmentId);
+            conditions.push(`i.shipment_id = $${params.length + 1}`);
+            params.push(shipmentId);
         }
 
         if (status) {
-             conditions.push(`i.status = $${params.length + 1}`);
-             params.push(status);
+            conditions.push(`i.status = $${params.length + 1}`);
+            params.push(status);
         }
 
         if (conditions.length > 0) {
@@ -114,7 +114,7 @@ export const getInvoices = async (req, res) => {
         sql += ' ORDER BY i.created_at DESC';
 
         const result = await query(sql, params);
-        
+
         return success(res, 'Invoices fetched', result.rows);
     } catch (err) {
         console.error('Get Invoices Error:', err);
