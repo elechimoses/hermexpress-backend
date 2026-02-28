@@ -86,7 +86,7 @@ export const sendShipmentNotifications = async (shipmentDetails) => {
   const sendEmail = async (to, subject, html) => {
     try {
       await transporter.sendMail({
-        from: '"Hermexpress" <no-reply@hermexpress.com>',
+        from: '"Hermexpress" <no-reply@hermesexp.com>',
         to,
         subject,
         html
@@ -177,7 +177,7 @@ export const sendInvoiceEmail = async (data) => {
 
   try {
     await transporter.sendMail({
-      from: '"Hermexpress" <no-reply@hermexpress.com>',
+      from: '"Hermexpress" <no-reply@hermesexp.com>',
       to: email,
       subject: `Invoice for Shipment ${trackingNumber}`,
       html: htmlContent
@@ -209,7 +209,7 @@ export const sendWalletFundingSuccessEmail = async (data) => {
 
   try {
     await transporter.sendMail({
-      from: '"Hermexpress" <no-reply@hermexpress.com>',
+      from: '"Hermexpress" <no-reply@hermesexp.com>',
       to: email,
       subject: 'Wallet Funding Successful',
       html: htmlContent
@@ -239,7 +239,7 @@ export const sendWalletFundingFailureEmail = async (data) => {
 
   try {
     await transporter.sendMail({
-      from: '"Hermexpress" <no-reply@hermexpress.com>',
+      from: '"Hermexpress" <no-reply@hermesexp.com>',
       to: email,
       subject: 'Wallet Funding Failed',
       html: htmlContent
@@ -266,12 +266,12 @@ export const sendAdminContactNotification = async (data) => {
             </div>
         `,
     buttonText: 'View in Admin',
-    buttonLink: 'https://admin.hermexpress.com/messages'
+    buttonLink: 'https://admin.hermesexp.com/messages'
   });
 
   try {
     await transporter.sendMail({
-      from: '"Hermexpress" <no-reply@hermexpress.com>',
+      from: '"Hermexpress" <no-reply@hermesexp.com>',
       to: adminEmail,
       subject: `New Contact Message from ${first_name} ${last_name}`,
       html: htmlContent
